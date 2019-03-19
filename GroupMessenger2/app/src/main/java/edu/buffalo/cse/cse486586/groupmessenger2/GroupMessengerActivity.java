@@ -14,6 +14,7 @@ import android.view.Menu;
 import android.view.View;
 import android.widget.EditText;
 import android.widget.TextView;
+
 import java.io.BufferedReader;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
@@ -26,11 +27,13 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.UnknownHostException;
 import java.util.*;
+
 import android.net.Uri;
+
 import java.net.SocketTimeoutException;
 
 
-public class GroupMessengerActivity extends Activity{
+public class GroupMessengerActivity extends Activity {
 
     static final String TAG = GroupMessengerActivity.class.getSimpleName();
 
@@ -52,16 +55,16 @@ public class GroupMessengerActivity extends Activity{
     int messageSequence = 0;
 
     /* Sequence for storing messages in content provider. */
-    int saveSequence = 0;
+    protected int saveSequence = 0;
 
     /* Counter for creating a unique identifier for messages. */
     int localMessageSequence = 0;
 
-    int failedPort;
+    protected int failedPort;
     String myPort = null;
 
     /* Priority queue to store and deliver incoming messages in each avd in FIFO order. */
-    PriorityQueue<MessageOrderModel> deliveryQueue = new PriorityQueue<MessageOrderModel>(100, new MessageModelComparator());
+    protected PriorityQueue<MessageOrderModel> deliveryQueue = new PriorityQueue<MessageOrderModel>(100, new MessageModelComparator());
 
     /* Map to store the message identifier as key and the proposal suggested, incoming port as values.  */
     Map<Integer, TreeMap<Integer, Integer>> msgProposalMap = new HashMap<Integer, TreeMap<Integer, Integer>>();
@@ -83,54 +86,10 @@ public class GroupMessengerActivity extends Activity{
 
         /* Job to deliver the messages which has received the agreedProposal and are marked ready from the priority queue */
         // Reference : https://stackoverflow.com/questions/11123621/running-code-in-main-thread-from-another-thread
+
         final Handler mainHandler = new Handler(Looper.getMainLooper());
 
-        Runnable runnable = new Runnable() {
-
-            public void run() {
-
-                if(!deliveryQueue.isEmpty()){
-
-                    MessageOrderModel head = deliveryQueue.peek();
-
-                    /* Remove message from priority-queue when the port it originated from has failed and message has not yet received an agreement. */
-                    if(head.getMyPort() == failedPort && !head.getReadyToDeliver()){
-
-                        deliveryQueue.poll();
-
-                    }
-                    /* Deliver the message head from priority-queue when message is ready and save the message in the avd local storage in key-value format. */
-                    else if(head.getReadyToDeliver()){
-
-                        ContentValues keyValueToInsert = new ContentValues();
-                        keyValueToInsert.put("key", String.valueOf(saveSequence));
-                        keyValueToInsert.put("value", head.getMessage());
-
-                        /* Inserts a row in the content provider.
-                         * Code reference: https://stackoverflow.com/questions/40440733/inserting-a-row-with-android-content-provider */
-                        Uri uri = Uri.parse("content://edu.buffalo.cse.cse486586.groupmessenger2.provider");
-                        getContentResolver().insert(uri, keyValueToInsert);
-
-                        TextView remoteTextView = (TextView) findViewById(R.id.textView1);
-                        remoteTextView.append(saveSequence+ "*"+head.createMessageStream() + "\t\n");
-
-                        saveSequence++;
-
-                        deliveryQueue.poll();
-
-                    }
-                    /* Check if the port is still alive by sending heartbeat, when message is not yet ready to deliver */
-                    else{
-                        head.setDummy(true);
-                        new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, head);
-
-                    }
-                }
-                mainHandler.postDelayed(this, 700);
-            }
-        };
-
-        mainHandler.post(runnable);
+        mainHandler.post(new DeliverMessageJob(mainHandler));
 
         // PA2B End
 
@@ -161,7 +120,7 @@ public class GroupMessengerActivity extends Activity{
                 /* Create Message Model when sending the message for the first time on the send button event. */
 
                 MessageOrderModel newMessage = new MessageOrderModel(Integer.MIN_VALUE, Integer.parseInt(myPort), msg, Integer.MIN_VALUE, false,
-                                                                        false, Integer.parseInt(myPort), false, localMessageSequence, false);
+                        false, Integer.parseInt(myPort), false, localMessageSequence, false);
 
                 localMessageSequence++;
 
@@ -187,10 +146,9 @@ public class GroupMessengerActivity extends Activity{
 
             try {
 
-                while(true) {
+                while (true) {
 
                     Socket socket = serverSocket.accept();
-
 
                     BufferedReader rd = new BufferedReader(new InputStreamReader(socket.getInputStream()));
                     String line = rd.readLine();
@@ -198,25 +156,24 @@ public class GroupMessengerActivity extends Activity{
 
                     /* Check if message sent to avd is a Heartbeat message or a MessageOrderModel. Heartbeat message is sent to
                         check if the port is still alive */
-                    if(msg.getDummy()){
+
+                    if (msg.getDummy()) {
 
                         DataOutputStream out = new DataOutputStream(socket.getOutputStream());
                         out.writeUTF("Acknowledge");
                         out.flush();
 
-                    }else {
-
-
+                    } else {
 
                         /* Check if the message is received by the avd for the first time and send a proposal for the message
                             to the incoming port . Proposal sequence is maintained by the messageSequence variable counter. */
+
                         if (!Boolean.valueOf(msg.getProposal()) && !Boolean.valueOf(msg.getAgreement())) {
 
                             msg.setSequenceNo(messageSequence);
                             msg.setProposal(true);
                             msg.setAgreement(false);
                             msg.setProposalPort(Integer.parseInt(myPort));
-
 
                             deliveryQueue.add(msg);
 
@@ -230,13 +187,17 @@ public class GroupMessengerActivity extends Activity{
                             messageSequence++;
 
                         }
-                        /* Perform task if the message is of type agreement and send the client an acknowledgement that the node is still alive. */
+                        /* Perform task if the message is of type agreement and send the client an acknowledgement that
+                           the node is still alive. */
                         else {
+
                             if (line != null) {
+
                                 publishProgress(line);
                                 DataOutputStream out = new DataOutputStream(socket.getOutputStream());
                                 out.writeUTF("Acknowledge");
                                 out.flush();
+
                             }
                         }
                     }
@@ -246,26 +207,30 @@ public class GroupMessengerActivity extends Activity{
                 }
 
             } catch (UnknownHostException e) {
+
                 Log.e(TAG, "ServerTask UnknownHostException");
-            } catch(IOException e){
+
+            } catch (IOException e) {
+
                 Log.e(TAG, "ServerTask socket IOException");
+
             }
 
             return null;
         }
 
-        protected void onProgressUpdate(String...strings) {
+        protected void onProgressUpdate(String... strings) {
 
             String strReceived = strings[0];
             MessageOrderModel msg = getMessageModelFromStream(strReceived);
 
             /* If the message is an agreed priority, sent by the initial avd to all the avds, the message sequence number for each of the avds
-                are changed to that of the final priority and are marked as delivered in the priority queue. */
+               are changed to that of the final priority and are marked as delivered in the priority queue. */
 
-            if(msg.getAgreedProposal()>Integer.MIN_VALUE && Boolean.valueOf(msg.getAgreement())){
+            if (msg.getAgreedProposal() > Integer.MIN_VALUE && Boolean.valueOf(msg.getAgreement())) {
 
                 /* Message is removed by checking equality on the overriden equals method of MessageOrderModel
-                on the basis of localsequence, message content and initial port. */
+                   on the basis of localsequence, message content and initial port. */
 
                 deliveryQueue.remove(msg);
 
@@ -276,9 +241,13 @@ public class GroupMessengerActivity extends Activity{
 
                 deliveryQueue.add(newMessage);
 
-                /* To handle the proposed sequence number so that it is larger than all observed priorities and larger than the previously proposed (by self) priority. */
-                if(newMessage.getSequenceNo() >= messageSequence){
+                /* To handle the proposed sequence number so that it is larger than all observed priorities
+                   and larger than the previously proposed (by self) priority. */
+
+                if (newMessage.getSequenceNo() >= messageSequence) {
+
                     messageSequence = newMessage.getSequenceNo() + 1;
+
                 }
 
 
@@ -295,12 +264,14 @@ public class GroupMessengerActivity extends Activity{
 
             MessageOrderModel msgModel = msgModels[0];
 
-
             List<Integer> newPortList = new ArrayList<Integer>(PORT_LIST);
 
-            if(msgModel.getDummy()){
+            if (msgModel.getDummy()) {
+
                 PORT_LIST.clear();
+
                 PORT_LIST.add(msgModel.getMyPort());
+
             }
 
             for (Integer port : PORT_LIST) {
@@ -312,7 +283,6 @@ public class GroupMessengerActivity extends Activity{
 
                     socket.setSoTimeout(1000);
 
-
                     PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
                     out.println(msgModel.createMessageStream());
 
@@ -322,25 +292,24 @@ public class GroupMessengerActivity extends Activity{
                     String ack = ds.readUTF();
                     if (ack.equals("Acknowledge")) {
                         Log.e(TAG, "Ack received");
-                    }
-                    else{
+                    } else {
 
                         MessageOrderModel msg = getMessageModelFromStream(ack);
 
                         /* If the message is of proposal type received from each of the avds for a particular message, then the proposalMap for
                             that particular message seqeunce is added to the map along with the port of the avd who sent the proposal. */
 
-                        if(Boolean.valueOf(msg.getProposal()) && msg.getAgreedProposal() == Integer.MIN_VALUE){
+                        if (Boolean.valueOf(msg.getProposal()) && msg.getAgreedProposal() == Integer.MIN_VALUE) {
 
-                            if(msgProposalMap.containsKey(msg.getLocalMessageSequence())){
+                            if (msgProposalMap.containsKey(msg.getLocalMessageSequence())) {
 
                                 TreeMap<Integer, Integer> proposalMap = msgProposalMap.get(msg.getLocalMessageSequence());
 
                                 proposalMap.put(msg.getProposalPort(), msg.getSequenceNo());
 
-                                msgProposalMap.put(msg.getLocalMessageSequence(),proposalMap);
+                                msgProposalMap.put(msg.getLocalMessageSequence(), proposalMap);
 
-                            }else{
+                            } else {
 
                                 TreeMap<Integer, Integer> proposalMap = new TreeMap<Integer, Integer>();
 
@@ -358,8 +327,7 @@ public class GroupMessengerActivity extends Activity{
                     socket.close();
 
                 }
-                /* When an avd is failed, an exception is caught from the receive acknowledgement and that particular port is removed from the portlist array. */
-                catch (SocketTimeoutException e){
+                /* When an avd is failed, an exception is caught from the receive acknowledgement and that particular port is removed from the portlist array. */ catch (SocketTimeoutException e) {
 
                     Log.e(TAG, "ClientTask SocketTimeoutException");
 
@@ -372,7 +340,7 @@ public class GroupMessengerActivity extends Activity{
 
                 }
                 // Ideally very rarely getting this exception.
-                catch (EOFException e){
+                catch (EOFException e) {
 
                     Log.e(TAG, "ClientTask EOFException");
 
@@ -392,7 +360,7 @@ public class GroupMessengerActivity extends Activity{
 
             PORT_LIST = new ArrayList<Integer>(newPortList);
 
-            if(!msgModel.getDummy() && msgProposalMap.containsKey(msgModel.getLocalMessageSequence())){
+            if (!msgModel.getDummy() && msgProposalMap.containsKey(msgModel.getLocalMessageSequence())) {
 
                 TreeMap<Integer, Integer> proposedMap = msgProposalMap.get(msgModel.getLocalMessageSequence());
 
@@ -406,22 +374,20 @@ public class GroupMessengerActivity extends Activity{
 
     /* The avd checks of the highest sequence:port combination in the proposal list for the message and
         suggests the same as the agreedProposal and sends the same to all the avds. */
-    private void sendAgreement(TreeMap<Integer, Integer> proposalMap, MessageOrderModel newMessage){
+    private void sendAgreement(TreeMap<Integer, Integer> proposalMap, MessageOrderModel newMessage) {
 
-        //TODO: size check dyanamic
-
-        if(proposalMap.size() >= PORT_LIST.size()) {
+        if (proposalMap.size() >= PORT_LIST.size()) {
 
             int maxSequence = 0;
             int maxPort = 0;
 
 
-            for(Map.Entry<Integer,Integer> entry : proposalMap.entrySet()) {
+            for (Map.Entry<Integer, Integer> entry : proposalMap.entrySet()) {
 
-                if(entry.getValue() >= maxSequence){
+                if (entry.getValue() >= maxSequence) {
 
                     maxSequence = entry.getValue();
-                    if(entry.getKey() >= maxPort){
+                    if (entry.getKey() >= maxPort) {
 
                         maxPort = entry.getKey();
                     }
@@ -429,8 +395,8 @@ public class GroupMessengerActivity extends Activity{
             }
 
 
-            MessageOrderModel messageOrderModel = new MessageOrderModel(newMessage.getSequenceNo(), maxPort, newMessage.getMessage(),maxSequence,
-                    false,true, newMessage.getMyPort(), newMessage.getReadyToDeliver(), newMessage.getLocalMessageSequence(), false);
+            MessageOrderModel messageOrderModel = new MessageOrderModel(newMessage.getSequenceNo(), maxPort, newMessage.getMessage(), maxSequence,
+                    false, true, newMessage.getMyPort(), newMessage.getReadyToDeliver(), newMessage.getLocalMessageSequence(), false);
 
             new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, messageOrderModel);
 
@@ -441,7 +407,7 @@ public class GroupMessengerActivity extends Activity{
 
 
     /* Conversion from Output/Input stream to  MessageOrderModel to avoid redundancy.*/
-    private MessageOrderModel getMessageModelFromStream(String stream){
+    private MessageOrderModel getMessageModelFromStream(String stream) {
 
         String strReceived = stream.trim();
         String[] msgComp = strReceived.split("~");
@@ -467,74 +433,74 @@ public class GroupMessengerActivity extends Activity{
         Boolean isDummy = Boolean.parseBoolean(msgComp[9]);
 
         MessageOrderModel newMessage = new MessageOrderModel(sequenceNo, proposalPort, message, agreedProposal, isProposal, isAgreement, my_Port, readyToDeliver, localSequenceNo, isDummy);
+
         return newMessage;
+
     }
 
 
+    private class DeliverMessageJob implements Runnable {
+
+        protected Handler mainHandler;
+
+        public DeliverMessageJob(Handler mainHandler) {
+            this.mainHandler = mainHandler;
+        }
+
+        public void run() {
+
+            if (!deliveryQueue.isEmpty()) {
+
+                MessageOrderModel head = deliveryQueue.peek();
+
+                /* Remove message from priority-queue when the port it originated from has failed and message has not yet received an agreement. */
+
+                if (head.getMyPort() == failedPort && !head.getReadyToDeliver()) {
+
+                    deliveryQueue.poll();
+
+                }
+
+                /* Deliver the message head from priority-queue when message is ready and save the message in the avd local storage in key-value format. */
+
+                else if (head.getReadyToDeliver()) {
+
+                    ContentValues keyValueToInsert = new ContentValues();
+
+                    keyValueToInsert.put("key", String.valueOf(saveSequence));
+
+                    keyValueToInsert.put("value", head.getMessage());
 
 
+                    /* Inserts a row in the content provider.
+                     * Code reference: https://stackoverflow.com/questions/40440733/inserting-a-row-with-android-content-provider */
 
+                    Uri uri = Uri.parse("content://edu.buffalo.cse.cse486586.groupmessenger2.provider");
 
-    /* HeartBeat implementation for the checking if a port is still alive with acknowledgement messages.*/
-//    private class LivePortCheck extends AsyncTask<String, Void, Void> {
-//
-//        @Override
-//        protected Void doInBackground(String... strings) {
-////            String failedPort = null;
-//
-//            List<Integer> newPortList = new ArrayList<Integer>(PORT_LIST);
-//            String port = strings[0].trim();
-//
-//            try {
-//
-//                Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), Integer.parseInt(port));
-//                socket.setSoTimeout(1000);
-//
-//                PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
-//                out.println("Live node check");
-//
-//                DataInputStream ds = new DataInputStream(socket.getInputStream());
-//
-//                String ack = ds.readUTF();
-//                if (ack.equals("Acknowledge")) {
-//                    Log.e(TAG, "Ack received");
-//                }
-//
-//                ds.close();
-//                socket.close();
-//
-//            } catch (SocketTimeoutException e){
-//
-//                Log.e(TAG, "ClientTask SocketTimeoutException");
-//
-//                failedPort = Integer.parseInt(port);
-//                newPortList.remove(port);
-//            } catch (UnknownHostException e) {
-//
-//                Log.e(TAG, "ClientTask UnknownHostException");
-//
-//            } catch (EOFException e){
-//
-//                Log.e(TAG, "ClientTask EOFException");
-//
-//                failedPort = Integer.parseInt(port);
-//                newPortList.remove(port);
-//            } catch (IOException e) {
-//
-//                Log.e(TAG, "ClientTask IOException");
-//
-//                failedPort = Integer.parseInt(port);
-//                newPortList.remove(port);
-//            }
-//
-//            PORT_LIST = new ArrayList<Integer>(newPortList);
-//
-//            return null;
-//        }
-//
-//    }
+                    getContentResolver().insert(uri, keyValueToInsert);
 
+                    TextView remoteTextView = (TextView) findViewById(R.id.textView1);
 
+                    remoteTextView.append(saveSequence + "~" + head.createMessageStream() + "\t\n");
 
+                    saveSequence++;
+
+                    deliveryQueue.poll();
+
+                }
+
+                /* Check if the port is still alive by sending heartbeat, when message is not yet ready to deliver */
+                else {
+
+                    head.setDummy(true);
+
+                    new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, head);
+
+                }
+            }
+
+            mainHandler.postDelayed(this, 700);
+        }
+    }
 
 }
