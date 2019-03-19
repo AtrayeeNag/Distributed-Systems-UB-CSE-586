@@ -121,8 +121,8 @@ public class GroupMessengerActivity extends Activity{
                     }
                     /* Check if the port is still alive by sending heartbeat, when message is not yet ready to deliver */
                     else{
-
-                        new LivePortCheck().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, String.valueOf(head.getMyPort()));
+                        head.setDummy(true);
+                        new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, head);
 
                     }
                 }
@@ -160,8 +160,8 @@ public class GroupMessengerActivity extends Activity{
 
                 /* Create Message Model when sending the message for the first time on the send button event. */
 
-                MessageOrderModel newMessage = new MessageOrderModel(-1, Integer.parseInt(myPort), msg, -1, false,
-                                                                        false, Integer.parseInt(myPort), false, localMessageSequence);
+                MessageOrderModel newMessage = new MessageOrderModel(Integer.MIN_VALUE, Integer.parseInt(myPort), msg, Integer.MIN_VALUE, false,
+                                                                        false, Integer.parseInt(myPort), false, localMessageSequence, false);
 
                 localMessageSequence++;
 
@@ -194,10 +194,11 @@ public class GroupMessengerActivity extends Activity{
 
                     BufferedReader rd = new BufferedReader(new InputStreamReader(socket.getInputStream()));
                     String line = rd.readLine();
+                    MessageOrderModel msg = getMessageModelFromStream(line);
 
                     /* Check if message sent to avd is a Heartbeat message or a MessageOrderModel. Heartbeat message is sent to
                         check if the port is still alive */
-                    if(line.equalsIgnoreCase("Live Node check")){
+                    if(msg.getDummy()){
 
                         DataOutputStream out = new DataOutputStream(socket.getOutputStream());
                         out.writeUTF("Acknowledge");
@@ -205,7 +206,7 @@ public class GroupMessengerActivity extends Activity{
 
                     }else {
 
-                        MessageOrderModel msg = getMessageModelFromStream(line);
+
 
                         /* Check if the message is received by the avd for the first time and send a proposal for the message
                             to the incoming port . Proposal sequence is maintained by the messageSequence variable counter. */
@@ -261,7 +262,7 @@ public class GroupMessengerActivity extends Activity{
             /* If the message is an agreed priority, sent by the initial avd to all the avds, the message sequence number for each of the avds
                 are changed to that of the final priority and are marked as delivered in the priority queue. */
 
-            if(msg.getAgreedProposal()>-1 && Boolean.valueOf(msg.getAgreement())){
+            if(msg.getAgreedProposal()>Integer.MIN_VALUE && Boolean.valueOf(msg.getAgreement())){
 
                 /* Message is removed by checking equality on the overriden equals method of MessageOrderModel
                 on the basis of localsequence, message content and initial port. */
@@ -270,7 +271,7 @@ public class GroupMessengerActivity extends Activity{
 
 
                 MessageOrderModel newMessage = new MessageOrderModel(msg.getAgreedProposal(), msg.getProposalPort(), msg.getMessage(),
-                        msg.getAgreedProposal(), false, false, msg.getMyPort(), true, msg.getLocalMessageSequence());
+                        msg.getAgreedProposal(), false, false, msg.getMyPort(), true, msg.getLocalMessageSequence(), false);
 
 
                 deliveryQueue.add(newMessage);
@@ -294,7 +295,13 @@ public class GroupMessengerActivity extends Activity{
 
             MessageOrderModel msgModel = msgModels[0];
 
+
             List<Integer> newPortList = new ArrayList<Integer>(PORT_LIST);
+
+            if(msgModel.getDummy()){
+                PORT_LIST.clear();
+                PORT_LIST.add(msgModel.getMyPort());
+            }
 
             for (Integer port : PORT_LIST) {
 
@@ -323,7 +330,7 @@ public class GroupMessengerActivity extends Activity{
                         /* If the message is of proposal type received from each of the avds for a particular message, then the proposalMap for
                             that particular message seqeunce is added to the map along with the port of the avd who sent the proposal. */
 
-                        if(Boolean.valueOf(msg.getProposal()) && msg.getAgreedProposal() == -1){
+                        if(Boolean.valueOf(msg.getProposal()) && msg.getAgreedProposal() == Integer.MIN_VALUE){
 
                             if(msgProposalMap.containsKey(msg.getLocalMessageSequence())){
 
@@ -385,7 +392,7 @@ public class GroupMessengerActivity extends Activity{
 
             PORT_LIST = new ArrayList<Integer>(newPortList);
 
-            if(msgProposalMap.containsKey(msgModel.getLocalMessageSequence())){
+            if(!msgModel.getDummy() && msgProposalMap.containsKey(msgModel.getLocalMessageSequence())){
 
                 TreeMap<Integer, Integer> proposedMap = msgProposalMap.get(msgModel.getLocalMessageSequence());
 
@@ -423,7 +430,7 @@ public class GroupMessengerActivity extends Activity{
 
 
             MessageOrderModel messageOrderModel = new MessageOrderModel(newMessage.getSequenceNo(), maxPort, newMessage.getMessage(),maxSequence,
-                    false,true, newMessage.getMyPort(), newMessage.getReadyToDeliver(), newMessage.getLocalMessageSequence());
+                    false,true, newMessage.getMyPort(), newMessage.getReadyToDeliver(), newMessage.getLocalMessageSequence(), false);
 
             new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, messageOrderModel);
 
@@ -457,70 +464,75 @@ public class GroupMessengerActivity extends Activity{
 
         int localSequenceNo = Integer.parseInt(msgComp[8]);
 
-        MessageOrderModel newMessage = new MessageOrderModel(sequenceNo, proposalPort, message, agreedProposal, isProposal, isAgreement, my_Port, readyToDeliver, localSequenceNo);
+        Boolean isDummy = Boolean.parseBoolean(msgComp[9]);
+
+        MessageOrderModel newMessage = new MessageOrderModel(sequenceNo, proposalPort, message, agreedProposal, isProposal, isAgreement, my_Port, readyToDeliver, localSequenceNo, isDummy);
         return newMessage;
     }
 
 
 
+
+
+
     /* HeartBeat implementation for the checking if a port is still alive with acknowledgement messages.*/
-    private class LivePortCheck extends AsyncTask<String, Void, Void> {
-
-        @Override
-        protected Void doInBackground(String... strings) {
-//            String failedPort = null;
-
-            List<Integer> newPortList = new ArrayList<Integer>(PORT_LIST);
-            String port = strings[0].trim();
-
-            try {
-
-                Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), Integer.parseInt(port));
-                socket.setSoTimeout(1000);
-
-                PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
-                out.println("Live node check");
-
-                DataInputStream ds = new DataInputStream(socket.getInputStream());
-
-                String ack = ds.readUTF();
-                if (ack.equals("Acknowledge")) {
-                    Log.e(TAG, "Ack received");
-                }
-
-                ds.close();
-                socket.close();
-
-            } catch (SocketTimeoutException e){
-
-                Log.e(TAG, "ClientTask SocketTimeoutException");
-
-                failedPort = Integer.parseInt(port);
-                newPortList.remove(port);
-            } catch (UnknownHostException e) {
-
-                Log.e(TAG, "ClientTask UnknownHostException");
-
-            } catch (EOFException e){
-
-                Log.e(TAG, "ClientTask EOFException");
-
-                failedPort = Integer.parseInt(port);
-                newPortList.remove(port);
-            } catch (IOException e) {
-
-                Log.e(TAG, "ClientTask IOException");
-
-                failedPort = Integer.parseInt(port);
-                newPortList.remove(port);
-            }
-
-            PORT_LIST = new ArrayList<Integer>(newPortList);
-
-            return null;
-        }
-
-    }
+//    private class LivePortCheck extends AsyncTask<String, Void, Void> {
+//
+//        @Override
+//        protected Void doInBackground(String... strings) {
+////            String failedPort = null;
+//
+//            List<Integer> newPortList = new ArrayList<Integer>(PORT_LIST);
+//            String port = strings[0].trim();
+//
+//            try {
+//
+//                Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), Integer.parseInt(port));
+//                socket.setSoTimeout(1000);
+//
+//                PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+//                out.println("Live node check");
+//
+//                DataInputStream ds = new DataInputStream(socket.getInputStream());
+//
+//                String ack = ds.readUTF();
+//                if (ack.equals("Acknowledge")) {
+//                    Log.e(TAG, "Ack received");
+//                }
+//
+//                ds.close();
+//                socket.close();
+//
+//            } catch (SocketTimeoutException e){
+//
+//                Log.e(TAG, "ClientTask SocketTimeoutException");
+//
+//                failedPort = Integer.parseInt(port);
+//                newPortList.remove(port);
+//            } catch (UnknownHostException e) {
+//
+//                Log.e(TAG, "ClientTask UnknownHostException");
+//
+//            } catch (EOFException e){
+//
+//                Log.e(TAG, "ClientTask EOFException");
+//
+//                failedPort = Integer.parseInt(port);
+//                newPortList.remove(port);
+//            } catch (IOException e) {
+//
+//                Log.e(TAG, "ClientTask IOException");
+//
+//                failedPort = Integer.parseInt(port);
+//                newPortList.remove(port);
+//            }
+//
+//            PORT_LIST = new ArrayList<Integer>(newPortList);
+//
+//            return null;
+//        }
+//
+//    }
 
 
 

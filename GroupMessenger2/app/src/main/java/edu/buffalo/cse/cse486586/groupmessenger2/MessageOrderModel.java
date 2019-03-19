@@ -14,12 +14,12 @@ public class MessageOrderModel {
     private int myPort;
     private Boolean readyToDeliver;
     private int localMessageSequence;
-
+    private Boolean isDummy;
 
 
     public MessageOrderModel(int sequenceNo, int proposalPort, String message, int agreedProposal,
                              Boolean isProposal, Boolean isAgreement, int myPort, Boolean readyToDeliver,
-                             int localMessageSequence){
+                             int localMessageSequence, Boolean isDummy){
 
         this.sequenceNo = sequenceNo;
         this.proposalPort = proposalPort;
@@ -30,7 +30,7 @@ public class MessageOrderModel {
         this.myPort = myPort;
         this.readyToDeliver = readyToDeliver;
         this.localMessageSequence = localMessageSequence;
-
+        this.isDummy = isDummy;
     }
 
     public int getSequenceNo() {
@@ -95,6 +95,9 @@ public class MessageOrderModel {
 
     public void setLocalMessageSequence(int localMessageSequence) { this.localMessageSequence = localMessageSequence; }
 
+    public Boolean getDummy() { return isDummy; }
+
+    public void setDummy(Boolean dummy) { isDummy = dummy; }
 
     public String createMessageStream(){
 
@@ -106,7 +109,8 @@ public class MessageOrderModel {
                 '~' + Boolean.valueOf(isAgreement) +
                 '~' + String.valueOf(myPort) +
                 '~' + Boolean.valueOf(readyToDeliver) +
-                '~' + String.valueOf(localMessageSequence);
+                '~' + String.valueOf(localMessageSequence) +
+                '~' + Boolean.valueOf(isDummy);
 
     }
 
@@ -124,6 +128,7 @@ public class MessageOrderModel {
                 ", myPort=" + myPort +
                 ", readyToDeliver=" + readyToDeliver +
                 ", localMessageSequence=" + localMessageSequence +
+                ", isDummy=" + isDummy +
                 '}';
 
     }

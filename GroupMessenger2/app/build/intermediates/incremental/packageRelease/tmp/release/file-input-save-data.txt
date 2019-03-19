@@ -1,7 +1,7 @@
 #Internal package file, do not edit.
-#Fri Mar 15 13:17:21 EDT 2019
+#Tue Mar 19 04:29:34 EDT 2019
 0.baseType=DIRECTORY
-0.base=/Users/atrayeenag/AndroidStudioProjects/GroupMessenger2/app/build/intermediates/dex/release/mergeDexRelease/out
+0.base=/Users/atrayeenag/Documents/GitHub/Distributed-Systems-UB-CSE-586/GroupMessenger2/app/build/intermediates/dex/release/mergeDexRelease/out
 0.path=classes.dex
 0.set=DEX
 count=1
