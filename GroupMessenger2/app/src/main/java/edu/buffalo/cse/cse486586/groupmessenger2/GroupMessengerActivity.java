@@ -14,7 +14,6 @@ import android.view.Menu;
 import android.view.View;
 import android.widget.EditText;
 import android.widget.TextView;
-
 import java.io.BufferedReader;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
@@ -27,10 +26,9 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.UnknownHostException;
 import java.util.*;
-
 import android.net.Uri;
-
 import java.net.SocketTimeoutException;
+import java.util.Map;
 
 
 public class GroupMessengerActivity extends Activity {
@@ -67,7 +65,7 @@ public class GroupMessengerActivity extends Activity {
     protected PriorityQueue<MessageOrderModel> deliveryQueue = new PriorityQueue<MessageOrderModel>(100, new MessageModelComparator());
 
     /* Map to store the message identifier as key and the proposal suggested, incoming port as values.  */
-    Map<Integer, TreeMap<Integer, Integer>> msgProposalMap = new HashMap<Integer, TreeMap<Integer, Integer>>();
+    Map<Integer, HashMap<Integer, Integer>> msgProposalMap = new HashMap<Integer, HashMap<Integer, Integer>>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -244,11 +242,10 @@ public class GroupMessengerActivity extends Activity {
                 /* To handle the proposed sequence number so that it is larger than all observed priorities
                    and larger than the previously proposed (by self) priority. */
 
-                if (newMessage.getSequenceNo() >= messageSequence) {
+                if (messageSequence <= newMessage.getSequenceNo())
 
                     messageSequence = newMessage.getSequenceNo() + 1;
 
-                }
 
 
             }
@@ -284,14 +281,18 @@ public class GroupMessengerActivity extends Activity {
                     socket.setSoTimeout(1000);
 
                     PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+
                     out.println(msgModel.createMessageStream());
 
                     /* Implementing full duplex TCP send and receive acknowledgement to check if port is still alive. */
                     DataInputStream ds = new DataInputStream(socket.getInputStream());
 
                     String ack = ds.readUTF();
+
                     if (ack.equals("Acknowledge")) {
+
                         Log.e(TAG, "Ack received");
+
                     } else {
 
                         MessageOrderModel msg = getMessageModelFromStream(ack);
@@ -303,7 +304,7 @@ public class GroupMessengerActivity extends Activity {
 
                             if (msgProposalMap.containsKey(msg.getLocalMessageSequence())) {
 
-                                TreeMap<Integer, Integer> proposalMap = msgProposalMap.get(msg.getLocalMessageSequence());
+                                HashMap<Integer, Integer> proposalMap = msgProposalMap.get(msg.getLocalMessageSequence());
 
                                 proposalMap.put(msg.getProposalPort(), msg.getSequenceNo());
 
@@ -311,7 +312,7 @@ public class GroupMessengerActivity extends Activity {
 
                             } else {
 
-                                TreeMap<Integer, Integer> proposalMap = new TreeMap<Integer, Integer>();
+                                HashMap<Integer, Integer> proposalMap = new HashMap<Integer, Integer>();
 
                                 proposalMap.put(msg.getProposalPort(), msg.getSequenceNo());
 
@@ -324,14 +325,19 @@ public class GroupMessengerActivity extends Activity {
 
 
                     ds.close();
+
                     socket.close();
 
                 }
-                /* When an avd is failed, an exception is caught from the receive acknowledgement and that particular port is removed from the portlist array. */ catch (SocketTimeoutException e) {
+
+                /* When an avd is failed, an exception is caught from the receive acknowledgement and that particular port is removed from the portlist array. */
+
+                catch (SocketTimeoutException e) {
 
                     Log.e(TAG, "ClientTask SocketTimeoutException");
 
                     failedPort = port;
+
                     newPortList.remove(port);
 
                 } catch (UnknownHostException e) {
@@ -362,7 +368,7 @@ public class GroupMessengerActivity extends Activity {
 
             if (!msgModel.getDummy() && msgProposalMap.containsKey(msgModel.getLocalMessageSequence())) {
 
-                TreeMap<Integer, Integer> proposedMap = msgProposalMap.get(msgModel.getLocalMessageSequence());
+                HashMap<Integer, Integer> proposedMap = msgProposalMap.get(msgModel.getLocalMessageSequence());
 
                 sendAgreement(proposedMap, msgModel);
             }
@@ -374,15 +380,18 @@ public class GroupMessengerActivity extends Activity {
 
     /* The avd checks of the highest sequence:port combination in the proposal list for the message and
         suggests the same as the agreedProposal and sends the same to all the avds. */
-    private void sendAgreement(TreeMap<Integer, Integer> proposalMap, MessageOrderModel newMessage) {
+    private void sendAgreement(Map<Integer, Integer> proposalMap, MessageOrderModel newMessage) {
 
         if (proposalMap.size() >= PORT_LIST.size()) {
+
+
+            TreeMap<Integer, Integer> proposalTMap = new TreeMap<Integer, Integer>(proposalMap);
+
 
             int maxSequence = 0;
             int maxPort = 0;
 
-
-            for (Map.Entry<Integer, Integer> entry : proposalMap.entrySet()) {
+            for (Map.Entry<Integer, Integer> entry : proposalTMap.entrySet()) {
 
                 if (entry.getValue() >= maxSequence) {
 
@@ -401,15 +410,19 @@ public class GroupMessengerActivity extends Activity {
             new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, messageOrderModel);
 
             /* Message which has been agreed upon with a final proposal has been removed from the proposalMap. */
+
             msgProposalMap.remove(messageOrderModel.getLocalMessageSequence());
+
         }
     }
 
 
     /* Conversion from Output/Input stream to  MessageOrderModel to avoid redundancy.*/
+
     private MessageOrderModel getMessageModelFromStream(String stream) {
 
         String strReceived = stream.trim();
+
         String[] msgComp = strReceived.split("~");
 
         int sequenceNo = Integer.parseInt(msgComp[0]);
@@ -453,7 +466,8 @@ public class GroupMessengerActivity extends Activity {
 
                 MessageOrderModel head = deliveryQueue.peek();
 
-                /* Remove message from priority-queue when the port it originated from has failed and message has not yet received an agreement. */
+                /* Remove message from priority-queue when the port it originated from has failed and
+                   message has not yet received an agreement. */
 
                 if (head.getMyPort() == failedPort && !head.getReadyToDeliver()) {
 
@@ -461,7 +475,8 @@ public class GroupMessengerActivity extends Activity {
 
                 }
 
-                /* Deliver the message head from priority-queue when message is ready and save the message in the avd local storage in key-value format. */
+                /* Deliver the message head from priority-queue when message is ready and save the
+                   message in the avd local storage in key-value format. */
 
                 else if (head.getReadyToDeliver()) {
 
