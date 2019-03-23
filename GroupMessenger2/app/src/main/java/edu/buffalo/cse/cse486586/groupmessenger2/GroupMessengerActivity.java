@@ -289,7 +289,7 @@ public class GroupMessengerActivity extends Activity {
 
                     if (ack.equals("Acknowledge")) {
 
-//                        Log.e(TAG, "Ack received");
+                        Log.e(TAG, "Ack received");
 
                     } else {
 
