@@ -14,6 +14,7 @@ import android.view.Menu;
 import android.view.View;
 import android.widget.EditText;
 import android.widget.TextView;
+
 import java.io.BufferedReader;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
@@ -26,7 +27,9 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.UnknownHostException;
 import java.util.*;
+
 import android.net.Uri;
+
 import java.net.SocketTimeoutException;
 import java.util.Map;
 
@@ -35,9 +38,6 @@ public class GroupMessengerActivity extends Activity {
 
     static final String TAG = GroupMessengerActivity.class.getSimpleName();
 
-//    static Integer[] portArr = {11108, 11112, 11116, 11120, 11124};
-
-
     List<Integer> PORT_LIST = new ArrayList<Integer>() {{
         add(11108);
         add(11112);
@@ -45,7 +45,6 @@ public class GroupMessengerActivity extends Activity {
         add(11120);
         add(11124);
     }};
-
 
     static final int SERVER_PORT = 10000;
 
@@ -80,16 +79,13 @@ public class GroupMessengerActivity extends Activity {
         TextView tv = (TextView) findViewById(R.id.textView1);
         tv.setMovementMethod(new ScrollingMovementMethod());
 
-        // PA2B Start
 
-        /* Job to deliver the messages which has received the agreedProposal and are marked ready from the priority queue */
         // Reference : https://stackoverflow.com/questions/11123621/running-code-in-main-thread-from-another-thread
 
         final Handler mainHandler = new Handler(Looper.getMainLooper());
 
         mainHandler.post(new DeliverMessageJob(mainHandler));
 
-        // PA2B End
 
         try {
 
@@ -175,6 +171,8 @@ public class GroupMessengerActivity extends Activity {
 
                             deliveryQueue.add(msg);
 
+                            Log.e(TAG, "Ready for Proposal ---------------------- "+msg.toString());
+
                             /* Reference : https://www.tutorialspoint.com/java/io/java_io_dataoutputstream.htm */
                             // Could not make this work using BufferedReader(new InputStreamReader()), changed to DataOutputStream/DataInputStream.
 
@@ -239,13 +237,14 @@ public class GroupMessengerActivity extends Activity {
 
                 deliveryQueue.add(newMessage);
 
+                Log.e(TAG, "Agreement received ---------------------- "+newMessage.toString());
+
                 /* To handle the proposed sequence number so that it is larger than all observed priorities
                    and larger than the previously proposed (by self) priority. */
 
                 if (messageSequence <= newMessage.getSequenceNo())
 
                     messageSequence = newMessage.getSequenceNo() + 1;
-
 
 
             }
@@ -257,7 +256,6 @@ public class GroupMessengerActivity extends Activity {
 
         @Override
         protected Void doInBackground(MessageOrderModel... msgModels) {
-//            String failedPort = null;
 
             MessageOrderModel msgModel = msgModels[0];
 
@@ -278,7 +276,7 @@ public class GroupMessengerActivity extends Activity {
                     Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}),
                             port);
 
-                    socket.setSoTimeout(1000);
+                    socket.setSoTimeout(1800);
 
                     PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
 
@@ -291,7 +289,7 @@ public class GroupMessengerActivity extends Activity {
 
                     if (ack.equals("Acknowledge")) {
 
-                        Log.e(TAG, "Ack received");
+//                        Log.e(TAG, "Ack received");
 
                     } else {
 
@@ -330,9 +328,7 @@ public class GroupMessengerActivity extends Activity {
 
                 }
 
-                /* When an avd is failed, an exception is caught from the receive acknowledgement and that particular port is removed from the portlist array. */
-
-                catch (SocketTimeoutException e) {
+                /* When an avd is failed, an exception is caught from the receive acknowledgement and that particular port is removed from the portlist array. */ catch (SocketTimeoutException e) {
 
                     Log.e(TAG, "ClientTask SocketTimeoutException");
 
@@ -377,15 +373,17 @@ public class GroupMessengerActivity extends Activity {
         }
     }
 
+    /**
+     * The avd checks of the highest sequence:port combination in the proposal list for the message and
+     * suggests the same as the agreedProposal and sends the same to all the avds.
+     */
 
-    /* The avd checks of the highest sequence:port combination in the proposal list for the message and
-        suggests the same as the agreedProposal and sends the same to all the avds. */
     private void sendAgreement(Map<Integer, Integer> proposalMap, MessageOrderModel newMessage) {
 
         if (proposalMap.size() >= PORT_LIST.size()) {
 
 
-            TreeMap<Integer, Integer> proposalTMap = new TreeMap<Integer, Integer>(proposalMap);
+            Map<Integer, Integer> proposalTMap = new TreeMap<Integer, Integer>(proposalMap);
 
 
             int maxSequence = 0;
@@ -417,7 +415,9 @@ public class GroupMessengerActivity extends Activity {
     }
 
 
-    /* Conversion from Output/Input stream to  MessageOrderModel to avoid redundancy.*/
+    /**
+     * Conversion from Output/Input stream to  MessageOrderModel to avoid redundancy.
+     */
 
     private MessageOrderModel getMessageModelFromStream(String stream) {
 
@@ -451,6 +451,12 @@ public class GroupMessengerActivity extends Activity {
 
     }
 
+    /**
+     * Job to deliver the messages which has received the final agreedProposal and are marked ready from the
+     * priority queue using the Runnable interface and saving them in the local storage.
+     * <p>
+     * Heartbeat implementation checks if the avd is alive to remove any messages from blocking the head of the priority queue.
+     */
 
     private class DeliverMessageJob implements Runnable {
 
@@ -466,19 +472,10 @@ public class GroupMessengerActivity extends Activity {
 
                 MessageOrderModel head = deliveryQueue.peek();
 
-                /* Remove message from priority-queue when the port it originated from has failed and
-                   message has not yet received an agreement. */
-
-                if (head.getMyPort() == failedPort && !head.getReadyToDeliver()) {
-
-                    deliveryQueue.poll();
-
-                }
-
-                /* Deliver the message head from priority-queue when message is ready and save the
+                 /* Deliver the message head from priority-queue when message is ready and save the
                    message in the avd local storage in key-value format. */
 
-                else if (head.getReadyToDeliver()) {
+                if (head.getReadyToDeliver()) {
 
                     ContentValues keyValueToInsert = new ContentValues();
 
@@ -499,6 +496,15 @@ public class GroupMessengerActivity extends Activity {
                     remoteTextView.append(saveSequence + "~" + head.createMessageStream() + "\t\n");
 
                     saveSequence++;
+
+                    deliveryQueue.poll();
+
+                }
+
+                /* Remove message from priority-queue when the port it originated from has failed and
+                   message has not yet received an agreement. */
+
+                else if (head.getMyPort() == failedPort) {
 
                     deliveryQueue.poll();
 
