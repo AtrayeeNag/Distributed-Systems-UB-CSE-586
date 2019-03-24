@@ -14,7 +14,6 @@ import android.view.Menu;
 import android.view.View;
 import android.widget.EditText;
 import android.widget.TextView;
-
 import java.io.BufferedReader;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
@@ -27,16 +26,25 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.UnknownHostException;
 import java.util.*;
-
 import android.net.Uri;
-
 import java.net.SocketTimeoutException;
 import java.util.Map;
+import java.util.concurrent.PriorityBlockingQueue;
 
 
 public class GroupMessengerActivity extends Activity {
 
     static final String TAG = GroupMessengerActivity.class.getSimpleName();
+
+    static final int SERVER_PORT = 10000;
+
+    /* Sequence for storing messages in content provider. */
+    protected int saveSequence = 0;
+
+    protected int failedPort;
+
+    /* Priority queue to store and deliver incoming messages in each avd in FIFO order. */
+    protected PriorityBlockingQueue<MessageOrderModel> deliveryQueue = new PriorityBlockingQueue<MessageOrderModel>(100, new MessageModelComparator());
 
     List<Integer> PORT_LIST = new ArrayList<Integer>() {{
         add(11108);
@@ -46,22 +54,12 @@ public class GroupMessengerActivity extends Activity {
         add(11124);
     }};
 
-    static final int SERVER_PORT = 10000;
-
     /* Counter for proposed messages by each avd. */
     int messageSequence = 0;
 
-    /* Sequence for storing messages in content provider. */
-    protected int saveSequence = 0;
-
     /* Counter for creating a unique identifier for messages. */
     int localMessageSequence = 0;
-
-    protected int failedPort;
     String myPort = null;
-
-    /* Priority queue to store and deliver incoming messages in each avd in FIFO order. */
-    protected PriorityQueue<MessageOrderModel> deliveryQueue = new PriorityQueue<MessageOrderModel>(100, new MessageModelComparator());
 
     /* Map to store the message identifier as key and the proposal suggested, incoming port as values.  */
     Map<Integer, HashMap<Integer, Integer>> msgProposalMap = new HashMap<Integer, HashMap<Integer, Integer>>();
@@ -111,6 +109,7 @@ public class GroupMessengerActivity extends Activity {
                 String msg = editText.getText().toString();
                 editText.setText("");
 
+
                 /* Create Message Model when sending the message for the first time on the send button event. */
 
                 MessageOrderModel newMessage = new MessageOrderModel(Integer.MIN_VALUE, Integer.parseInt(myPort), msg, Integer.MIN_VALUE, false,
@@ -130,6 +129,108 @@ public class GroupMessengerActivity extends Activity {
         getMenuInflater().inflate(R.menu.activity_group_messenger, menu);
         return true;
     }
+
+    /**
+     * The avd checks of the highest sequence:port combination in the proposal list for the message and
+     * suggests the same as the agreedProposal and sends the same to all the avds.
+     */
+
+    private void sendAgreement(Map<Integer, Integer> proposalMap, MessageOrderModel newMessage) {
+
+        if (proposalMap.size() >= PORT_LIST.size()) {
+
+
+            Map<Integer, Integer> proposalTMap = new TreeMap<Integer, Integer>(proposalMap);
+
+
+            int maxSequence = 0;
+            int maxPort = 0;
+
+            for (Map.Entry<Integer, Integer> entry : proposalTMap.entrySet()) {
+
+                if (entry.getValue() >= maxSequence) {
+
+                    maxSequence = entry.getValue();
+                    if (entry.getKey() >= maxPort) {
+
+                        maxPort = entry.getKey();
+                    }
+                }
+            }
+
+
+            MessageOrderModel messageOrderModel = new MessageOrderModel(newMessage.getSequenceNo(), maxPort, newMessage.getMessage(), maxSequence,
+                    false, true, newMessage.getMyPort(), newMessage.getReadyToDeliver(), newMessage.getLocalMessageSequence(), false);
+
+            new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, messageOrderModel);
+
+            /* Message which has been agreed upon with a final proposal has been removed from the proposalMap. */
+
+            msgProposalMap.remove(messageOrderModel.getLocalMessageSequence());
+
+        }
+    }
+
+    /**
+     * Conversion from Output/Input stream to  MessageOrderModel to avoid redundancy.
+     */
+
+    private MessageOrderModel getMessageModelFromStream(String stream) {
+
+        String strReceived = stream.trim();
+
+        String[] msgComp = strReceived.split("~");
+
+        int sequenceNo = Integer.parseInt(msgComp[0]);
+
+        int proposalPort = Integer.parseInt(msgComp[1]);
+
+        String message = msgComp[2];
+
+        int agreedProposal = Integer.parseInt(msgComp[3]);
+
+        Boolean isProposal = Boolean.parseBoolean(msgComp[4]);
+
+        Boolean isAgreement = Boolean.parseBoolean(msgComp[5]);
+
+        int my_Port = Integer.parseInt(msgComp[6]);
+
+        Boolean readyToDeliver = Boolean.parseBoolean(msgComp[7]);
+
+        int localSequenceNo = Integer.parseInt(msgComp[8]);
+
+        Boolean isDummy = Boolean.parseBoolean(msgComp[9]);
+
+        MessageOrderModel newMessage = new MessageOrderModel(sequenceNo, proposalPort, message, agreedProposal, isProposal, isAgreement, my_Port, readyToDeliver, localSequenceNo, isDummy);
+
+        return newMessage;
+
+    }
+
+
+    /**
+     * Insert the messages in the local storage using content provider.
+     */
+
+    private void insertIntoLocalStorage(MessageOrderModel messageOrderModel){
+
+        ContentValues keyValueToInsert = new ContentValues();
+
+        keyValueToInsert.put("key", String.valueOf(saveSequence));
+
+        keyValueToInsert.put("value", messageOrderModel.getMessage());
+
+
+        /* Inserts a row in the content provider.
+         * Code reference: https://stackoverflow.com/questions/40440733/inserting-a-row-with-android-content-provider */
+
+        Uri uri = Uri.parse("content://edu.buffalo.cse.cse486586.groupmessenger2.provider");
+
+        getContentResolver().insert(uri, keyValueToInsert);
+
+    }
+
+
 
 
     private class ServerTask extends AsyncTask<ServerSocket, String, Void> {
@@ -158,6 +259,7 @@ public class GroupMessengerActivity extends Activity {
                         out.flush();
 
                     } else {
+
 
                         /* Check if the message is received by the avd for the first time and send a proposal for the message
                             to the incoming port . Proposal sequence is maintained by the messageSequence variable counter. */
@@ -189,10 +291,41 @@ public class GroupMessengerActivity extends Activity {
 
                             if (line != null) {
 
-                                publishProgress(line);
                                 DataOutputStream out = new DataOutputStream(socket.getOutputStream());
                                 out.writeUTF("Acknowledge");
                                 out.flush();
+
+                                /* If the message is an agreed priority, sent by the initial avd to all the avds, the message sequence number for each of the avds
+                                 are changed to that of the final priority and are marked as delivered in the priority queue. */
+
+                                if (msg.getAgreedProposal() > Integer.MIN_VALUE && Boolean.valueOf(msg.getAgreement())) {
+
+
+                                    /* Message is removed by checking equality on the overriden equals method of MessageOrderModel
+                                   on the basis of localsequence, message content and initial port. */
+
+                                    deliveryQueue.remove(msg);
+
+
+                                    MessageOrderModel newMessage = new MessageOrderModel(msg.getAgreedProposal(), msg.getProposalPort(), msg.getMessage(),
+                                            msg.getAgreedProposal(), false, false, msg.getMyPort(), true, msg.getLocalMessageSequence(), false);
+
+
+                                    deliveryQueue.add(newMessage);
+
+                                    Log.e(TAG, "Agreement received ---------------------- "+newMessage.toString());
+
+
+                                    /* To handle the proposed sequence number so that it is larger than all observed priorities
+                                    and larger than the previously proposed (by self) priority. */
+
+                                    if (messageSequence <= newMessage.getSequenceNo())
+
+                                        messageSequence = newMessage.getSequenceNo() + 1;
+
+
+                                }
+
 
                             }
                         }
@@ -215,42 +348,10 @@ public class GroupMessengerActivity extends Activity {
             return null;
         }
 
-        protected void onProgressUpdate(String... strings) {
-
-            String strReceived = strings[0];
-            MessageOrderModel msg = getMessageModelFromStream(strReceived);
-
-            /* If the message is an agreed priority, sent by the initial avd to all the avds, the message sequence number for each of the avds
-               are changed to that of the final priority and are marked as delivered in the priority queue. */
-
-            if (msg.getAgreedProposal() > Integer.MIN_VALUE && Boolean.valueOf(msg.getAgreement())) {
-
-                /* Message is removed by checking equality on the overriden equals method of MessageOrderModel
-                   on the basis of localsequence, message content and initial port. */
-
-                deliveryQueue.remove(msg);
-
-
-                MessageOrderModel newMessage = new MessageOrderModel(msg.getAgreedProposal(), msg.getProposalPort(), msg.getMessage(),
-                        msg.getAgreedProposal(), false, false, msg.getMyPort(), true, msg.getLocalMessageSequence(), false);
-
-
-                deliveryQueue.add(newMessage);
-
-                Log.e(TAG, "Agreement received ---------------------- "+newMessage.toString());
-
-                /* To handle the proposed sequence number so that it is larger than all observed priorities
-                   and larger than the previously proposed (by self) priority. */
-
-                if (messageSequence <= newMessage.getSequenceNo())
-
-                    messageSequence = newMessage.getSequenceNo() + 1;
-
-
-            }
-
-        }
     }
+
+
+
 
     private class ClientTask extends AsyncTask<MessageOrderModel, Void, Void> {
 
@@ -295,6 +396,7 @@ public class GroupMessengerActivity extends Activity {
 
                         MessageOrderModel msg = getMessageModelFromStream(ack);
 
+
                         /* If the message is of proposal type received from each of the avds for a particular message, then the proposalMap for
                             that particular message seqeunce is added to the map along with the port of the avd who sent the proposal. */
 
@@ -321,19 +423,17 @@ public class GroupMessengerActivity extends Activity {
                         }
                     }
 
-
                     ds.close();
-
                     socket.close();
 
                 }
 
-                /* When an avd is failed, an exception is caught from the receive acknowledgement and that particular port is removed from the portlist array. */ catch (SocketTimeoutException e) {
+
+                /* When an avd is failed, an exception is caught from the receive acknowledgement and that particular port is removed from the portlist array. */
+                catch (SocketTimeoutException e) {
 
                     Log.e(TAG, "ClientTask SocketTimeoutException");
-
                     failedPort = port;
-
                     newPortList.remove(port);
 
                 } catch (UnknownHostException e) {
@@ -345,14 +445,12 @@ public class GroupMessengerActivity extends Activity {
                 catch (EOFException e) {
 
                     Log.e(TAG, "ClientTask EOFException");
-
                     failedPort = port;
                     newPortList.remove(port);
 
                 } catch (IOException e) {
 
                     Log.e(TAG, "ClientTask IOException");
-
                     failedPort = port;
                     newPortList.remove(port);
 
@@ -373,83 +471,7 @@ public class GroupMessengerActivity extends Activity {
         }
     }
 
-    /**
-     * The avd checks of the highest sequence:port combination in the proposal list for the message and
-     * suggests the same as the agreedProposal and sends the same to all the avds.
-     */
 
-    private void sendAgreement(Map<Integer, Integer> proposalMap, MessageOrderModel newMessage) {
-
-        if (proposalMap.size() >= PORT_LIST.size()) {
-
-
-            Map<Integer, Integer> proposalTMap = new TreeMap<Integer, Integer>(proposalMap);
-
-
-            int maxSequence = 0;
-            int maxPort = 0;
-
-            for (Map.Entry<Integer, Integer> entry : proposalTMap.entrySet()) {
-
-                if (entry.getValue() >= maxSequence) {
-
-                    maxSequence = entry.getValue();
-                    if (entry.getKey() >= maxPort) {
-
-                        maxPort = entry.getKey();
-                    }
-                }
-            }
-
-
-            MessageOrderModel messageOrderModel = new MessageOrderModel(newMessage.getSequenceNo(), maxPort, newMessage.getMessage(), maxSequence,
-                    false, true, newMessage.getMyPort(), newMessage.getReadyToDeliver(), newMessage.getLocalMessageSequence(), false);
-
-            new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, messageOrderModel);
-
-            /* Message which has been agreed upon with a final proposal has been removed from the proposalMap. */
-
-            msgProposalMap.remove(messageOrderModel.getLocalMessageSequence());
-
-        }
-    }
-
-
-    /**
-     * Conversion from Output/Input stream to  MessageOrderModel to avoid redundancy.
-     */
-
-    private MessageOrderModel getMessageModelFromStream(String stream) {
-
-        String strReceived = stream.trim();
-
-        String[] msgComp = strReceived.split("~");
-
-        int sequenceNo = Integer.parseInt(msgComp[0]);
-
-        int proposalPort = Integer.parseInt(msgComp[1]);
-
-        String message = msgComp[2];
-
-        int agreedProposal = Integer.parseInt(msgComp[3]);
-
-        Boolean isProposal = Boolean.parseBoolean(msgComp[4]);
-
-        Boolean isAgreement = Boolean.parseBoolean(msgComp[5]);
-
-        int my_Port = Integer.parseInt(msgComp[6]);
-
-        Boolean readyToDeliver = Boolean.parseBoolean(msgComp[7]);
-
-        int localSequenceNo = Integer.parseInt(msgComp[8]);
-
-        Boolean isDummy = Boolean.parseBoolean(msgComp[9]);
-
-        MessageOrderModel newMessage = new MessageOrderModel(sequenceNo, proposalPort, message, agreedProposal, isProposal, isAgreement, my_Port, readyToDeliver, localSequenceNo, isDummy);
-
-        return newMessage;
-
-    }
 
     /**
      * Job to deliver the messages which has received the final agreedProposal and are marked ready from the
@@ -477,19 +499,8 @@ public class GroupMessengerActivity extends Activity {
 
                 if (head.getReadyToDeliver()) {
 
-                    ContentValues keyValueToInsert = new ContentValues();
+                    insertIntoLocalStorage(head);
 
-                    keyValueToInsert.put("key", String.valueOf(saveSequence));
-
-                    keyValueToInsert.put("value", head.getMessage());
-
-
-                    /* Inserts a row in the content provider.
-                     * Code reference: https://stackoverflow.com/questions/40440733/inserting-a-row-with-android-content-provider */
-
-                    Uri uri = Uri.parse("content://edu.buffalo.cse.cse486586.groupmessenger2.provider");
-
-                    getContentResolver().insert(uri, keyValueToInsert);
 
                     TextView remoteTextView = (TextView) findViewById(R.id.textView1);
 
