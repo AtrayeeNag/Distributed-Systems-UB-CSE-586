@@ -64,6 +64,9 @@ public class GroupMessengerActivity extends Activity {
     /* Map to store the message identifier as key and the proposal suggested, incoming port as values.  */
     Map<Integer, HashMap<Integer, Integer>> msgProposalMap = new HashMap<Integer, HashMap<Integer, Integer>>();
 
+    MessageOrderModel lastMsgOnHead = null;
+    int sameMsgOnHeadCounter = 0;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
 
@@ -398,7 +401,7 @@ public class GroupMessengerActivity extends Activity {
 
 
                         /* If the message is of proposal type received from each of the avds for a particular message, then the proposalMap for
-                            that particular message seqeunce is added to the map along with the port of the avd who sent the proposal. */
+                            that particular message sequence is added to the map along with the port of the avd who sent the proposal. */
 
                         if (Boolean.valueOf(msg.getProposal()) && msg.getAgreedProposal() == Integer.MIN_VALUE) {
 
@@ -429,7 +432,7 @@ public class GroupMessengerActivity extends Activity {
                 }
 
 
-                /* When an avd is failed, an exception is caught from the receive acknowledgement and that particular port is removed from the portlist array. */
+                /* When an avd is failed, an exception is caught from the receive acknowledgement and that particular port is removed from portlist. */
                 catch (SocketTimeoutException e) {
 
                     Log.e(TAG, "ClientTask SocketTimeoutException");
@@ -520,13 +523,32 @@ public class GroupMessengerActivity extends Activity {
                     deliveryQueue.poll();
 
                 }
-
-                /* Check if the port is still alive by sending heartbeat, when message is not yet ready to deliver */
                 else {
 
-                    head.setDummy(true);
+                    /* checks if the same message is blocking the delivery queue for last 3 iterations.
+                    * If yes, send a heartbeat to check if the port is still alive
+                    * */
 
-                    new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, head);
+                    if(lastMsgOnHead!=null && lastMsgOnHead.equals(head)){
+
+                        if(sameMsgOnHeadCounter == 2){
+
+                            head.setDummy(true);
+
+                            new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, head);
+
+                            sameMsgOnHeadCounter = 0;
+
+                        }
+
+                        sameMsgOnHeadCounter++;
+
+                    } else{
+
+                        lastMsgOnHead = head;
+
+                    }
+
 
                 }
             }
