@@ -34,7 +34,9 @@ public class SimpleDhtProvider extends ContentProvider {
 
     String myEmulatorId = null;
     String myPort = null;
-    TreeSet<NodeModel> nodeSet = new TreeSet<NodeModel>();
+    String successorId = null;
+    String predecessorId = null;
+    TreeSet<NodeMessageModel> nodeSet = new TreeSet<NodeMessageModel>();
 
 
     @Override
@@ -53,17 +55,22 @@ public class SimpleDhtProvider extends ContentProvider {
     public Uri insert(Uri uri, ContentValues values) {
         // TODO Auto-generated method stub
 
-        String filename = (String) values.get("key");
-        String contentVal = (String) values.get("value");
-        FileOutputStream outputStream;
+        String dataKey = (String) values.get("key");
+        String dataValue = (String) values.get("value");
 
-        try {
-            outputStream = getContext().openFileOutput(filename, Context.MODE_PRIVATE);
-            outputStream.write(contentVal.getBytes());
-            outputStream.close();
-        } catch (Exception e) {
-            Log.e(TAG, "File write failed");
-        }
+        DataMessageModel dataMessageModel = new DataMessageModel(dataKey, dataValue, DhtOperationTypeConstant.DATA_INSERT);
+        new ClientTaskData().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, dataMessageModel);
+
+
+//        FileOutputStream outputStream;
+//
+//        try {
+//            outputStream = getContext().openFileOutput(filename, Context.MODE_PRIVATE);
+//            outputStream.write(contentVal.getBytes());
+//            outputStream.close();
+//        } catch (Exception e) {
+//            Log.e(TAG, "File write failed");
+//        }
 
         Log.v("insert", values.toString());
         return uri;
@@ -88,8 +95,8 @@ public class SimpleDhtProvider extends ContentProvider {
 
 
         // Send request for join
-        NodeModel nodeModel = new NodeModel(myEmulatorId, myEmulatorId, myEmulatorId, null, Boolean.FALSE);
-        new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, nodeModel);
+        NodeMessageModel nodeMessageModel = new NodeMessageModel(myEmulatorId, myEmulatorId, myEmulatorId, Boolean.FALSE, DhtOperationTypeConstant.NODE_JOIN);
+        new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, nodeMessageModel);
 
 
         return false;
@@ -137,73 +144,41 @@ public class SimpleDhtProvider extends ContentProvider {
 
             try {
 
-                Socket socket = serverSocket.accept();
-                BufferedReader rd = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-                String line = rd.readLine();
+                while (true) {
+
+                    Socket socket = serverSocket.accept();
+                    BufferedReader rd = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                    String line = rd.readLine();
 
 
-                if (line != null) {
+                    if (line != null) {
 
-                    String strReceived = line.trim();
-                    String[] strReceivedArr = strReceived.split("~");
+                        String strReceived = line.trim();
+                        Log.d(TAG, "recieved::" + strReceived);
+                        String[] strReceivedArr = strReceived.split("~");
 
-                    if (strReceivedArr[0].equalsIgnoreCase("Node")) {
 
-                        NodeModel nodeModel = NodeModel.createNodeModel(strReceivedArr);
+                        if (strReceivedArr[0].equalsIgnoreCase("Node")) {
 
-                        nodeSet.add(nodeModel);
+                            NodeMessageModel nodeMessageModel = NodeMessageModel.createNodeModel(strReceivedArr);
 
-                        if (!nodeSet.isEmpty()) {
+                            if (nodeMessageModel.getNodeOperation().equalsIgnoreCase(DhtOperationTypeConstant.NODE_JOIN)) {
 
-                            nodeSet.add(nodeModel);
+                                Log.i(TAG, "Join Request" + "~" + nodeMessageModel.toString());
+                                joinNodeToRing(nodeMessageModel, nodeSet);
 
-                            NodeModel curr = null;
-                            NodeModel prev = null;
-                            NodeModel next = null;
+                            } else {
 
-                            if(searchNode(nodeSet, nodeModel) != null){
-
-                                curr = nodeModel;
-
-                                if(curr.equals(nodeSet.first())){
-
-                                    prev = nodeSet.last();
-                                    next = nodeSet.higher(curr);
-
-                                } else if(curr.equals(nodeSet.last())){
-
-                                    prev = nodeSet.lower(curr);
-                                    next = nodeSet.first();
-
-                                } else{
-
-                                    prev = nodeSet.lower(curr);
-                                    next = nodeSet.higher(curr);
-
-                                }
-
-                                prev.setSuccessorId(curr.getNodeId());
-                                curr.setPredecessorId(prev.getNodeId());
-                                curr.setSuccessorId(next.getNodeId());
-                                next.setPredecessorId(curr.getNodeId());
+                                Log.i(TAG, "Update Request" + "~" + nodeMessageModel.toString());
+                                successorId = nodeMessageModel.getSuccessorId();
+                                predecessorId = nodeMessageModel.getPredecessorId();
 
                             }
 
-                            TreeSet<NodeModel> interSet = new TreeSet<NodeModel>();
-                            interSet.add(prev);
-                            interSet.add(curr);
-                            interSet.add(next);
-                            nodeSet.addAll(interSet);
 
-
-
-
+                        } else {
+                            // TODO for DataModel
                         }
-
-
-                    } else {
-                        // TODO for DataModel
-                    }
 
 //                        ContentValues keyValueToInsert = new ContentValues();
 //                        keyValueToInsert.put("key", String.valueOf(messageSequence));
@@ -214,12 +189,11 @@ public class SimpleDhtProvider extends ContentProvider {
 //
 //                        publishProgress(line);
 //                        messageSequence++;
+                    }
+
+
+                    socket.close();
                 }
-
-
-                socket.close();
-                rd.close();
-
 
             } catch (UnknownHostException e) {
                 Log.e(TAG, "ServerTask UnknownHostException");
@@ -233,34 +207,38 @@ public class SimpleDhtProvider extends ContentProvider {
     }
 
 
-    private class ClientTask extends AsyncTask<NodeModel, Void, Void> {
+    private class ClientTask extends AsyncTask<NodeMessageModel, Void, Void> {
 
         @Override
-        protected Void doInBackground(NodeModel... nodes) {
+        protected Void doInBackground(NodeMessageModel... nodes) {
             try {
 
-                Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), LEADER_NODE_PORT);
+                NodeMessageModel nodeMessageModel = nodes[0];
 
+                Socket socket = null;
 
-                NodeModel nodeModel = nodes[0];
-                nodeModel.setIncomingNodeId(String.valueOf(LEADER_NODE_ID));
+                if(nodeMessageModel.getNodeOperation().equalsIgnoreCase(DhtOperationTypeConstant.NODE_JOIN))
+
+                    socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), LEADER_NODE_PORT);
+
+                else
+                    socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), Integer.parseInt(nodeMessageModel.getNodeId()) * 2);
 
 
                 PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
-                out.println(nodeModel.createNodeStream());
+                out.println(nodeMessageModel.createNodeStream());
 
 
-                DataInputStream ds = new DataInputStream(socket.getInputStream());
-                String ack = ds.readUTF();
-
-
-                if (ack.equals("Acknowledge")) {
-                    Log.e(TAG, "Ack received");
-                }
+//                DataInputStream ds = new DataInputStream(socket.getInputStream());
+//                String ack = ds.readUTF();
+//
+//
+//                if (ack.equals("Acknowledge")) {
+//                    Log.e(TAG, "Ack received");
+//                }
 
 
                 socket.close();
-                out.close();
 
             } catch (UnknownHostException e) {
                 Log.e(TAG, "ClientTask UnknownHostException");
@@ -273,16 +251,133 @@ public class SimpleDhtProvider extends ContentProvider {
     }
 
 
+    private class ClientTaskData extends AsyncTask<DataMessageModel, Void, Void> {
+
+        @Override
+        protected Void doInBackground(DataMessageModel... datas) {
+            try {
+
+                DataMessageModel dataMessageModel = datas[0];
+
+                Socket socket = socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), LEADER_NODE_PORT);
+
+                PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+                out.println(dataMessageModel.createDataStream());
+
+
+//                DataInputStream ds = new DataInputStream(socket.getInputStream());
+//                String ack = ds.readUTF();
+//
+//
+//                if (ack.equals("Acknowledge")) {
+//                    Log.e(TAG, "Ack received");
+//                }
+
+
+                socket.close();
+
+            } catch (UnknownHostException e) {
+                Log.e(TAG, "ClientTask UnknownHostException");
+            } catch (IOException e) {
+                Log.e(TAG, "ClientTask socket IOException");
+            }
+
+            return null;
+        }
+
+    }
+
 
     // Reference : https://stackoverflow.com/questions/17806543/find-and-return-an-element-from-a-treeset-in-java
 
-    private NodeModel searchNode(TreeSet<NodeModel> nodeSet, NodeModel key) {
+    private NodeMessageModel searchNode(TreeSet<NodeMessageModel> nodeSet, NodeMessageModel key) {
 
-        NodeModel ceil  = nodeSet.ceiling(key); // least elt >= key
-        NodeModel floor = nodeSet.floor(key);   // highest elt <= key
+        NodeMessageModel ceil  = nodeSet.ceiling(key); // least elt >= key
+        NodeMessageModel floor = nodeSet.floor(key);   // highest elt <= key
         return ceil == floor? ceil : null;
 
     }
+
+
+    private void joinNodeToRing(NodeMessageModel nodeMessageModel, TreeSet<NodeMessageModel> nodeSet){
+
+        nodeSet.add(nodeMessageModel);
+
+        if (!nodeSet.isEmpty() && nodeSet.size() > 1) {
+
+            NodeMessageModel curr = null;
+            NodeMessageModel prev = null;
+            NodeMessageModel next = null;
+
+            if(searchNode(nodeSet, nodeMessageModel) != null){
+
+                curr = nodeMessageModel;
+
+                if(curr.equals(nodeSet.first())){
+
+                    prev = nodeSet.last();
+                    next = nodeSet.higher(curr);
+
+                } else if(curr.equals(nodeSet.last())){
+
+                    prev = nodeSet.lower(curr);
+                    next = nodeSet.first();
+
+                } else{
+
+                    prev = nodeSet.lower(curr);
+                    next = nodeSet.higher(curr);
+
+                }
+
+                prev.setSuccessorId(curr.getNodeId());
+                curr.setPredecessorId(prev.getNodeId());
+                curr.setSuccessorId(next.getNodeId());
+                next.setPredecessorId(curr.getNodeId());
+
+            }
+
+            prev.setNodeOperation(DhtOperationTypeConstant.NODE_UPDATE);
+            curr.setNodeOperation(DhtOperationTypeConstant.NODE_UPDATE);
+            next.setNodeOperation(DhtOperationTypeConstant.NODE_UPDATE);
+
+            nodeSet.add(prev);
+            nodeSet.add(curr);
+            nodeSet.add(next);
+
+            if(nodeSet.size() == 1){
+
+                new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, curr);
+
+
+            } else if(nodeSet.size() == 2){
+
+                if(curr.equals(nodeSet.first())){
+
+                    new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, curr);
+                    new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, next);
+
+                } else{
+
+                    new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, prev);
+                    new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, curr);
+
+                }
+            } else{
+
+                new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, prev);
+                new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, curr);
+                new ClientTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, next);
+
+            }
+
+        }
+
+
+    }
+
+
+
 
 
 }

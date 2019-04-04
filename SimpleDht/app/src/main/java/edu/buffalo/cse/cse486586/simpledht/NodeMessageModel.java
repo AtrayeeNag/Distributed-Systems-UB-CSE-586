@@ -1,24 +1,24 @@
 package edu.buffalo.cse.cse486586.simpledht;
 
-import java.security.NoSuchAlgorithmException;
 import java.util.Objects;
 
-public class NodeModel implements Comparable<NodeModel>{
+public class NodeMessageModel implements Comparable<NodeMessageModel>{
     String nodeId;
     String successorId;
     String predecessorId;
-    String incomingNodeId;
     Boolean hasJoined;
+    String nodeOperation;
+
 
 
     static final String TYPE = "Node";
 
-    public NodeModel(String nodeId, String successorId, String predecessorId, String incomingNodeId, Boolean hasJoined) {
+    public NodeMessageModel(String nodeId, String successorId, String predecessorId, Boolean hasJoined, String nodeOperation) {
         this.nodeId = nodeId;
         this.successorId = successorId;
         this.predecessorId = predecessorId;
-        this.incomingNodeId = incomingNodeId;
         this.hasJoined = hasJoined;
+        this.nodeOperation = nodeOperation;
     }
 
     public String getNodeId() {
@@ -53,20 +53,20 @@ public class NodeModel implements Comparable<NodeModel>{
         this.hasJoined = hasJoined;
     }
 
-    public String getIncomingNodeId() {
-        return incomingNodeId;
+    public String getNodeOperation() {
+        return nodeOperation;
     }
 
-    public void setIncomingNodeId(String incomingNodeId) {
-        this.incomingNodeId = incomingNodeId;
+    public void setNodeOperation(String nodeOperation) {
+        this.nodeOperation = nodeOperation;
     }
 
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
-        if (!(o instanceof NodeModel)) return false;
-        NodeModel nodeModel = (NodeModel) o;
-        return getNodeId() == nodeModel.getNodeId();
+        if (!(o instanceof NodeMessageModel)) return false;
+        NodeMessageModel nodeMessageModel = (NodeMessageModel) o;
+        return getNodeId() == nodeMessageModel.getNodeId();
     }
 
     @Override
@@ -76,12 +76,12 @@ public class NodeModel implements Comparable<NodeModel>{
 
     @Override
     public String toString() {
-        return "NodeModel{" +
+        return "NodeMessageModel{" +
                 "nodeId='" + nodeId + '\'' +
                 ", successorId='" + successorId + '\'' +
                 ", predecessorId='" + predecessorId + '\'' +
-                ", incomingNodeId='" + incomingNodeId + '\'' +
                 ", hasJoined=" + hasJoined +
+                ", nodeOperation='" + nodeOperation + '\'' +
                 '}';
     }
 
@@ -90,18 +90,18 @@ public class NodeModel implements Comparable<NodeModel>{
                 '~' + nodeId +
                 '~' + successorId +
                 '~' + predecessorId +
-                '~' + incomingNodeId +
-                '~' + Boolean.valueOf(hasJoined);
+                '~' + Boolean.valueOf(hasJoined) +
+                '~' + nodeOperation ;
 
     }
 
-    public static NodeModel createNodeModel(String[] strReceived){
-        NodeModel node = new NodeModel(strReceived[1], strReceived[2], strReceived[3], strReceived[3], Boolean.parseBoolean(strReceived[5]));
-        return node;
+    public static NodeMessageModel createNodeModel(String[] strReceived){
+        NodeMessageModel nodeMessage = new NodeMessageModel(strReceived[1], strReceived[2], strReceived[3], Boolean.parseBoolean(strReceived[4]), strReceived[5]);
+        return nodeMessage;
 
     }
 
-    public int compareTo(NodeModel node){
+    public int compareTo(NodeMessageModel node){
         try {
             return SimpleDhtUtil.genHash(this.nodeId).compareTo(SimpleDhtUtil.genHash(node.nodeId));
         } catch(Exception e){
