@@ -116,20 +116,43 @@ public class SimpleDhtProvider extends ContentProvider {
         MatrixCursor mCursor = new MatrixCursor(mColumns);
         FileInputStream inputStream;
 
-        try {
-            inputStream = getContext().openFileInput(selection);
-            BufferedReader rd = new BufferedReader(new InputStreamReader(inputStream));
-            String mValues = rd.readLine();
+        if(selection.equals("@")){
 
-            mCursor.addRow(new String[] {selection, mValues});
+            for(String file : getContext().fileList()){
+                try {
+                    inputStream = getContext().openFileInput(file);
+                    BufferedReader rd = new BufferedReader(new InputStreamReader(inputStream));
+                    String mValues = rd.readLine();
 
-        }catch (FileNotFoundException e) {
-            Log.e(TAG, "File not found");
-        }catch (IOException e){
-            Log.e(TAG, "IO Exception");
+                    Log.e(TAG,"file name::" + file);
+
+                    mCursor.newRow()
+                            .add("key", file)
+                            .add("value", mValues);
+
+
+                }catch (FileNotFoundException e) {
+                    Log.e(TAG, "File not found");
+                }catch (IOException e){
+                    Log.e(TAG, "IO Exception");
+                }
+
+            }
+        } else{
+            try {
+                inputStream = getContext().openFileInput(selection);
+                BufferedReader rd = new BufferedReader(new InputStreamReader(inputStream));
+                String mValues = rd.readLine();
+
+                mCursor.addRow(new String[] {selection, mValues});
+
+            }catch (FileNotFoundException e) {
+                Log.e(TAG, "File not found");
+            }catch (IOException e){
+                Log.e(TAG, "IO Exception");
+            }
         }
 
-        Log.v("query", selection);
         return mCursor;
     }
 

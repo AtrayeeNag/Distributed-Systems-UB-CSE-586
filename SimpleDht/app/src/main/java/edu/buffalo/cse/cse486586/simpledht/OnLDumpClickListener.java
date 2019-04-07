@@ -68,7 +68,7 @@ public class OnLDumpClickListener implements OnClickListener {
         }
 
         protected void onProgressUpdate(String...strings) {
-            mTextView.append(strings[0]);
+            mTextView.append(strings[0]+ "\n");
 
             return;
         }
