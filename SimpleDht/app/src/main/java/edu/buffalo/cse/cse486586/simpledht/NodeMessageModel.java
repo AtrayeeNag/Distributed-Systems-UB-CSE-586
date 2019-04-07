@@ -96,7 +96,11 @@ public class NodeMessageModel implements Comparable<NodeMessageModel>{
     }
 
     public static NodeMessageModel createNodeModel(String[] strReceived){
-        NodeMessageModel nodeMessage = new NodeMessageModel(strReceived[1], strReceived[2], strReceived[3], Boolean.parseBoolean(strReceived[4]), strReceived[5]);
+        NodeMessageModel nodeMessage = new NodeMessageModel(strReceived[1],
+                                                            strReceived[2],
+                                                            strReceived[3],
+                                                            Boolean.parseBoolean(strReceived[4]),
+                                                            strReceived[5]);
         return nodeMessage;
 
     }

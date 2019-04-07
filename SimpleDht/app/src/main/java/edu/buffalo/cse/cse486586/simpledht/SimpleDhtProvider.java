@@ -19,6 +19,7 @@ import android.database.Cursor;
 import android.database.MatrixCursor;
 import android.net.Uri;
 import android.os.AsyncTask;
+import android.provider.ContactsContract;
 import android.telephony.TelephonyManager;
 import android.util.Log;
 import java.util.*;
@@ -58,19 +59,20 @@ public class SimpleDhtProvider extends ContentProvider {
         String dataKey = (String) values.get("key");
         String dataValue = (String) values.get("value");
 
-        DataMessageModel dataMessageModel = new DataMessageModel(dataKey, dataValue, DhtOperationTypeConstant.DATA_INSERT);
-        new ClientTaskData().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, dataMessageModel);
+        DataMessageModel dataMessageModel = new DataMessageModel(dataKey, dataValue, DhtOperationTypeConstant.DATA_INSERT, null, myEmulatorId);
 
+        String targetNode = lookUpDataPosition(dataMessageModel);
 
-//        FileOutputStream outputStream;
-//
-//        try {
-//            outputStream = getContext().openFileOutput(filename, Context.MODE_PRIVATE);
-//            outputStream.write(contentVal.getBytes());
-//            outputStream.close();
-//        } catch (Exception e) {
-//            Log.e(TAG, "File write failed");
-//        }
+        if(targetNode.equals(myEmulatorId)) {
+
+            insertDatatoLocal(dataMessageModel);
+
+        } else {
+
+            dataMessageModel.setTargetNode(targetNode);
+            new ClientTaskData().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, dataMessageModel);
+        }
+
 
         Log.v("insert", values.toString());
         return uri;
@@ -82,6 +84,8 @@ public class SimpleDhtProvider extends ContentProvider {
         TelephonyManager tel = (TelephonyManager) this.getContext().getSystemService(Context.TELEPHONY_SERVICE);
         myEmulatorId = tel.getLine1Number().substring(tel.getLine1Number().length() - 4);
         myPort = String.valueOf(Integer.parseInt(myEmulatorId) * 2);
+        predecessorId = myEmulatorId;
+        successorId = myEmulatorId;
 
 
         try {
@@ -117,11 +121,11 @@ public class SimpleDhtProvider extends ContentProvider {
             BufferedReader rd = new BufferedReader(new InputStreamReader(inputStream));
             String mValues = rd.readLine();
 
-            mCursor.addRow(new String[]{selection, mValues});
+            mCursor.addRow(new String[] {selection, mValues});
 
-        } catch (FileNotFoundException e) {
+        }catch (FileNotFoundException e) {
             Log.e(TAG, "File not found");
-        } catch (IOException e) {
+        }catch (IOException e){
             Log.e(TAG, "IO Exception");
         }
 
@@ -165,11 +169,13 @@ public class SimpleDhtProvider extends ContentProvider {
                             if (nodeMessageModel.getNodeOperation().equalsIgnoreCase(DhtOperationTypeConstant.NODE_JOIN)) {
 
                                 Log.i(TAG, "Join Request" + "~" + nodeMessageModel.toString());
+
                                 joinNodeToRing(nodeMessageModel, nodeSet);
 
                             } else {
 
                                 Log.i(TAG, "Update Request" + "~" + nodeMessageModel.toString());
+
                                 successorId = nodeMessageModel.getSuccessorId();
                                 predecessorId = nodeMessageModel.getPredecessorId();
 
@@ -177,18 +183,27 @@ public class SimpleDhtProvider extends ContentProvider {
 
 
                         } else {
-                            // TODO for DataModel
+
+                            DataMessageModel dataMessageModel = DataMessageModel.createDataModel(strReceivedArr);
+
+                            if(DhtOperationTypeConstant.DATA_INSERT.equalsIgnoreCase(dataMessageModel.getDataOperationType())){
+
+                                Log.i(TAG, "Insert Request" + "~" + dataMessageModel.createDataStream());
+
+                                insertDataToRing(dataMessageModel);
+
+                            }
+                            else if(DhtOperationTypeConstant.DATA_QUERY.equalsIgnoreCase(dataMessageModel.getDataOperationType())){
+                                // TODO for query
+
+
+                            } else{
+                                // TODO for delete
+                            }
+
+
                         }
 
-//                        ContentValues keyValueToInsert = new ContentValues();
-//                        keyValueToInsert.put("key", String.valueOf(messageSequence));
-//                        keyValueToInsert.put("value", line);
-//
-//                        Uri uri = Uri.parse("content://edu.buffalo.cse.cse486586.groupmessenger1.provider");
-//                        getContentResolver().insert(uri, keyValueToInsert);
-//
-//                        publishProgress(line);
-//                        messageSequence++;
                     }
 
 
@@ -254,15 +269,20 @@ public class SimpleDhtProvider extends ContentProvider {
     private class ClientTaskData extends AsyncTask<DataMessageModel, Void, Void> {
 
         @Override
-        protected Void doInBackground(DataMessageModel... datas) {
+        protected Void doInBackground(DataMessageModel... data) {
             try {
 
-                DataMessageModel dataMessageModel = datas[0];
+                DataMessageModel dataMessageModel = data[0];
 
-                Socket socket = socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), LEADER_NODE_PORT);
+                Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), Integer.parseInt(dataMessageModel.getTargetNode())*2);
 
                 PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
                 out.println(dataMessageModel.createDataStream());
+
+
+
+
+               socket.close();
 
 
 //                DataInputStream ds = new DataInputStream(socket.getInputStream());
@@ -274,7 +294,7 @@ public class SimpleDhtProvider extends ContentProvider {
 //                }
 
 
-                socket.close();
+
 
             } catch (UnknownHostException e) {
                 Log.e(TAG, "ClientTask UnknownHostException");
@@ -309,7 +329,7 @@ public class SimpleDhtProvider extends ContentProvider {
             NodeMessageModel prev = null;
             NodeMessageModel next = null;
 
-            if(searchNode(nodeSet, nodeMessageModel) != null){
+            if(searchNode(nodeSet, nodeMessageModel) != null ){
 
                 curr = nodeMessageModel;
 
@@ -377,6 +397,85 @@ public class SimpleDhtProvider extends ContentProvider {
     }
 
 
+
+    private void insertDataToRing(DataMessageModel dataMessageModel) {
+
+        String targetNode = lookUpDataPosition(dataMessageModel);
+
+        if(targetNode.equals(myEmulatorId)) {
+
+            insertDatatoLocal(dataMessageModel);
+
+        }else {
+
+            dataMessageModel.setTargetNode(targetNode);
+            new ClientTaskData().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, dataMessageModel);
+        }
+
+    }
+
+
+
+    private void insertDatatoLocal(DataMessageModel dataMessageModel){
+
+            FileOutputStream outputStream;
+
+            try {
+
+                outputStream = getContext().openFileOutput(dataMessageModel.getKey(), Context.MODE_PRIVATE);
+                outputStream.write(dataMessageModel.getMessage().getBytes());
+                outputStream.close();
+
+            } catch (Exception e) {
+                Log.e(TAG, "File write failed");
+            }
+
+    }
+
+
+
+    private String lookUpDataPosition(DataMessageModel dataMessageModel){
+
+        try {
+
+            Boolean isfirstNode = Boolean.FALSE;
+
+            String hashPredId = SimpleDhtUtil.genHash(predecessorId);
+            String hashMyEmulatId = SimpleDhtUtil.genHash(myEmulatorId);
+            String hashDataMessageKey = SimpleDhtUtil.genHash(dataMessageModel.getKey());
+
+            if(hashPredId.compareTo(hashMyEmulatId) > 0)
+                isfirstNode = Boolean.TRUE;
+
+
+            if(isfirstNode){
+                if(hashDataMessageKey.compareTo(myEmulatorId) > 0
+                        && hashDataMessageKey.compareTo(hashPredId)<0)
+
+                    return successorId;
+
+                else
+
+                    return myEmulatorId;
+
+            }else{
+                if(hashDataMessageKey.compareTo(hashPredId) > 0
+                        && hashDataMessageKey.compareTo(hashMyEmulatId) <= 0)
+
+                    return myEmulatorId;
+
+                else
+
+                    return successorId;
+
+            }
+
+        } catch(Exception e){
+            Log.e(TAG, "Error generating Hash");
+
+        }
+        return null;
+    }
 
 
 
