@@ -7,16 +7,21 @@ public class DataMessageModel {
     String dataOperationType;
     String position;
     String targetNode;
+    String originNode;
 
 
     static final String TYPE = "Data";
 
-    public DataMessageModel(String key, String message, String dataOperationType, String position, String targetNode) {
+    public DataMessageModel() {
+    }
+
+    public DataMessageModel(String key, String message, String dataOperationType, String position, String targetNode, String originNode) {
         this.key = key;
         this.message = message;
         this.dataOperationType = dataOperationType;
         this.position = position;
         this.targetNode = targetNode;
+        this.originNode = originNode;
     }
 
     public String getKey() {
@@ -59,19 +64,33 @@ public class DataMessageModel {
         this.targetNode = targetNode;
     }
 
+    public String getOriginNode() {
+        return originNode;
+    }
+
+    public void setOriginNode(String originNode) {
+        this.originNode = originNode;
+    }
+
     public String createDataStream(){
         return  TYPE +
                 '~' + key +
                 '~' + message +
                 '~' + dataOperationType +
                 '~' + position +
-                '~' + targetNode;
+                '~' + targetNode +
+                '~' + originNode;
 
     }
 
-    public static DataMessageModel createDataModel(String[] strReceived){
-        DataMessageModel dataMessageModel = new DataMessageModel(strReceived[1], strReceived[2], strReceived[3], strReceived[4], strReceived[5]);
-        return dataMessageModel;
+    public void createDataModel(String[] strReceived){
+
+        this.key = strReceived[1];
+        this.message = strReceived[2];
+        this.dataOperationType = strReceived[3];
+        this.position = strReceived[4];
+        this.targetNode = strReceived[5];
+        this.originNode = strReceived[6];
 
     }
 

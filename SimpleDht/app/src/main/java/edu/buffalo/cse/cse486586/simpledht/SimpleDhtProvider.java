@@ -2,6 +2,7 @@ package edu.buffalo.cse.cse486586.simpledht;
 
 import java.io.BufferedReader;
 import java.io.DataInputStream;
+import java.io.DataOutputStream;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
@@ -40,9 +41,13 @@ public class SimpleDhtProvider extends ContentProvider {
     TreeSet<NodeMessageModel> nodeSet = new TreeSet<NodeMessageModel>();
 
 
+
     @Override
     public int delete(Uri uri, String selection, String[] selectionArgs) {
         // TODO Auto-generated method stub
+
+        getContext().deleteFile(selection);
+
         return 0;
     }
 
@@ -59,20 +64,21 @@ public class SimpleDhtProvider extends ContentProvider {
         String dataKey = (String) values.get("key");
         String dataValue = (String) values.get("value");
 
-        DataMessageModel dataMessageModel = new DataMessageModel(dataKey, dataValue, DhtOperationTypeConstant.DATA_INSERT, null, myEmulatorId);
+        if(dataKey != null && dataValue != null) {
+            DataMessageModel dataMessageModel = new DataMessageModel(dataKey, dataValue, DhtOperationTypeConstant.DATA_INSERT, null, myEmulatorId, null);
 
-        String targetNode = lookUpDataPosition(dataMessageModel);
+            String targetNode = lookUpDataPosition(dataMessageModel);
 
-        if(targetNode.equals(myEmulatorId)) {
+            if (targetNode.equals(myEmulatorId)) {
 
-            insertDatatoLocal(dataMessageModel);
+                insertDatatoLocal(dataMessageModel);
 
-        } else {
+            } else {
 
-            dataMessageModel.setTargetNode(targetNode);
-            new ClientTaskData().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, dataMessageModel);
+                dataMessageModel.setTargetNode(targetNode);
+                new ClientTaskData().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, dataMessageModel);
+            }
         }
-
 
         Log.v("insert", values.toString());
         return uri;
@@ -113,10 +119,63 @@ public class SimpleDhtProvider extends ContentProvider {
         // TODO Auto-generated method stub
 
         String[] mColumns = {"key", "value"};
-        MatrixCursor mCursor = new MatrixCursor(mColumns);
+
         FileInputStream inputStream;
 
-        if(selection.equals("@")){
+        if(selection.equals("*")){
+
+            List<DataMessageModel> dataList = new ArrayList<DataMessageModel>();
+
+            if(myEmulatorId.equals(successorId) && myEmulatorId.equals(predecessorId)) {
+
+                Log.i(TAG, "********One node in ring*********");
+
+                MatrixCursor mCursor = new MatrixCursor(mColumns);
+
+                for (String file : getContext().fileList()) {
+                    try {
+                        inputStream = getContext().openFileInput(file);
+
+                        BufferedReader rd = new BufferedReader(new InputStreamReader(inputStream));
+                        String mValues = rd.readLine();
+
+                        Log.e(TAG, "file name::" + file);
+
+                        mCursor.newRow()
+                                .add("key", file)
+                                .add("value", mValues);
+
+
+                    } catch (FileNotFoundException e) {
+                        Log.e(TAG, "File not found");
+                    } catch (IOException e) {
+                        Log.e(TAG, "IO Exception");
+                    }
+
+                }
+
+                return mCursor;
+
+            } else {
+
+                MatrixCursor mCursor = new MatrixCursor(mColumns);
+
+                Log.i(TAG, "************More than one node in ring************");
+                dataList.addAll(queryAllDataFromRing(myEmulatorId));
+
+                for(DataMessageModel data : dataList) {
+                    mCursor.newRow()
+                            .add("key", data.getKey())
+                            .add("value", data.getMessage());
+                }
+
+                return mCursor;
+            }
+
+
+        } else if(selection.equals("@")){
+
+            MatrixCursor mCursor = new MatrixCursor(mColumns);
 
             for(String file : getContext().fileList()){
                 try {
@@ -138,22 +197,58 @@ public class SimpleDhtProvider extends ContentProvider {
                 }
 
             }
+
+            return mCursor;
+
         } else{
-            try {
-                inputStream = getContext().openFileInput(selection);
-                BufferedReader rd = new BufferedReader(new InputStreamReader(inputStream));
-                String mValues = rd.readLine();
 
-                mCursor.addRow(new String[] {selection, mValues});
 
-            }catch (FileNotFoundException e) {
-                Log.e(TAG, "File not found");
-            }catch (IOException e){
-                Log.e(TAG, "IO Exception");
+
+            DataMessageModel dataMessageModel = new DataMessageModel(selection, null, DhtOperationTypeConstant.DATA_QUERY, null, myEmulatorId, myEmulatorId);
+
+
+            String targetNode = lookUpDataPosition(dataMessageModel);
+
+            if (targetNode.equals(myEmulatorId)) {
+
+                MatrixCursor mCursor = new MatrixCursor(mColumns);
+
+                try {
+                    inputStream = getContext().openFileInput(selection);
+                    BufferedReader rd = new BufferedReader(new InputStreamReader(inputStream));
+                    String mValues = rd.readLine();
+
+                    Log.e(TAG,"file name::" + selection);
+
+                    mCursor.newRow()
+                            .add("key", selection)
+                            .add("value", mValues);
+
+                }catch (FileNotFoundException e) {
+                    Log.e(TAG, "File not found");
+                }catch (IOException e){
+                    Log.e(TAG, "IO Exception");
+                }
+
+                return mCursor;
+
+            } else{
+
+                MatrixCursor mCursor = new MatrixCursor(mColumns);
+
+                dataMessageModel.setTargetNode(targetNode);
+                DataMessageModel resultModel = queryDataFromRing(dataMessageModel);
+
+                mCursor.newRow()
+                        .add("key", resultModel.getKey())
+                        .add("value", resultModel.getMessage());
+
+                return mCursor;
             }
+
         }
 
-        return mCursor;
+
     }
 
     @Override
@@ -205,24 +300,67 @@ public class SimpleDhtProvider extends ContentProvider {
                             }
 
 
-                        } else {
+                        } else if(strReceivedArr[0].equalsIgnoreCase("Data")){
 
-                            DataMessageModel dataMessageModel = DataMessageModel.createDataModel(strReceivedArr);
+                            if(strReceivedArr.length >1) {
 
-                            if(DhtOperationTypeConstant.DATA_INSERT.equalsIgnoreCase(dataMessageModel.getDataOperationType())){
+                                DataMessageModel dataMessageModel = new DataMessageModel();
+                                dataMessageModel.createDataModel(strReceivedArr);
 
-                                Log.i(TAG, "Insert Request" + "~" + dataMessageModel.createDataStream());
+                                if (DhtOperationTypeConstant.DATA_INSERT.equalsIgnoreCase(dataMessageModel.getDataOperationType())) {
 
-                                insertDataToRing(dataMessageModel);
+                                    Log.i(TAG, "Insert Request" + "~" + dataMessageModel.createDataStream());
+
+                                    insertDataToRing(dataMessageModel);
+
+                                } else if (DhtOperationTypeConstant.DATA_QUERY.equalsIgnoreCase(dataMessageModel.getDataOperationType())) {
+                                    // TODO for query
+                                    DataMessageModel resultModel = queryDataFromRing(dataMessageModel);
+
+                                    DataOutputStream out = new DataOutputStream(socket.getOutputStream());
+                                    out.writeUTF(resultModel.createDataStream());
+                                    out.flush();
+                                    out.close();
+
+                                } else {
+                                    // TODO for delete
+                                }
+                            }
+
+
+                        } else{
+
+                            // query all data
+
+                            Log.d(TAG,"get msg::"+line);
+                            Log.d(TAG,"my id::"+myEmulatorId);
+
+                            if(strReceivedArr[0].equalsIgnoreCase(DhtOperationTypeConstant.DATA_QUERY)){
+
+                                if(strReceivedArr[1].equalsIgnoreCase(myEmulatorId)){
+
+                                    DataOutputStream out = new DataOutputStream(socket.getOutputStream());
+                                    out.writeUTF(" ");
+                                    out.flush();
+                                    out.close();
+
+                                } else{
+
+                                    List<DataMessageModel> dataList = queryAllDataFromRing(strReceivedArr[1]);
+
+                                    DataOutputStream out = new DataOutputStream(socket.getOutputStream());
+                                    out.writeUTF(convertDataListToStream(dataList));
+                                    out.flush();
+                                    out.close();
+
+
+                                }
+
 
                             }
-                            else if(DhtOperationTypeConstant.DATA_QUERY.equalsIgnoreCase(dataMessageModel.getDataOperationType())){
-                                // TODO for query
 
 
-                            } else{
-                                // TODO for delete
-                            }
+
 
 
                         }
@@ -326,6 +464,51 @@ public class SimpleDhtProvider extends ContentProvider {
             }
 
             return null;
+        }
+
+    }
+
+
+
+    private class ClientTaskDataList extends AsyncTask<String, Void, String> {
+
+        @Override
+        protected String doInBackground(String... query) {
+
+            String result = "";
+            try {
+
+
+                Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), Integer.parseInt(successorId)*2);
+
+//                socket.setSoTimeout(3000);
+                PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+                out.println(query[0]);
+
+                //socket.close();
+
+
+
+                DataInputStream ds = new DataInputStream(socket.getInputStream());
+                result = ds.readUTF();
+
+
+//                if (ack.equals("Acknowledge")) {
+//                    Log.e(TAG, "Ack received");
+//                }
+                ds.close();
+                socket.close();
+
+
+
+
+            } catch (UnknownHostException e) {
+                Log.e(TAG, "ClientTask UnknownHostException");
+            } catch (IOException e) {
+                Log.e(TAG, "ClientTask socket IOException");
+            }
+
+            return result;
         }
 
     }
@@ -472,7 +655,7 @@ public class SimpleDhtProvider extends ContentProvider {
 
 
             if(isfirstNode){
-                if(hashDataMessageKey.compareTo(myEmulatorId) > 0
+                if(hashDataMessageKey.compareTo(hashMyEmulatId) > 0
                         && hashDataMessageKey.compareTo(hashPredId)<0)
 
                     return successorId;
@@ -500,6 +683,138 @@ public class SimpleDhtProvider extends ContentProvider {
         return null;
     }
 
+    private String convertDataListToStream(List<DataMessageModel> dataList){
 
+        if(!dataList.isEmpty()){
+            StringBuilder strBuild = new StringBuilder();
+
+            for(DataMessageModel data : dataList){
+
+                strBuild.append(data.createDataStream());
+                strBuild.append("#");
+
+            }
+
+            return strBuild.toString().replaceAll("#$", "");
+
+        }
+
+        return " ";
+    }
+
+
+    private List<DataMessageModel> convertStreamToDataList(String stream){
+
+        if(stream != null){
+
+            List<DataMessageModel> dataList = new ArrayList<DataMessageModel>();
+            String strReceived = stream.trim();
+
+            Log.d(TAG, "recieved::" + strReceived);
+            String[] strReceivedArr = strReceived.split("#");
+
+            for(String dataString : strReceivedArr){
+
+                if(dataString.trim().length() >0) {
+                    String[] dataStream = dataString.trim().split("~");
+                    if(dataStream.length > 1) {
+                        DataMessageModel dataMessageModel = new DataMessageModel();
+                        dataMessageModel.createDataModel(dataStream);
+                        dataList.add(dataMessageModel);
+                    }
+                }
+
+            }
+
+            return dataList;
+        }
+
+        return null;
+
+    }
+
+    private List<DataMessageModel> queryAllDataFromRing(String originId){
+
+        FileInputStream inputStream;
+        List<DataMessageModel> dataList = new ArrayList<DataMessageModel>();
+
+
+        for (String file : getContext().fileList()) {
+            try {
+                inputStream = getContext().openFileInput(file);
+
+                BufferedReader rd = new BufferedReader(new InputStreamReader(inputStream));
+                String mValues = rd.readLine();
+
+                Log.e(TAG, "file name::" + file);
+
+                if(file != null && mValues != null) {
+                    DataMessageModel dataMessageModel = new DataMessageModel(file, mValues, DhtOperationTypeConstant.DATA_QUERY, null, null, originId);
+                    dataList.add(dataMessageModel);
+                }
+
+            } catch (FileNotFoundException e) {
+                Log.e(TAG, "File not found");
+            } catch (IOException e) {
+                Log.e(TAG, "IO Exception");
+            }
+
+        }
+
+        String stream = DhtOperationTypeConstant.DATA_QUERY + "~" + originId;
+
+        try {
+            String resultData = new ClientTaskDataList().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, stream).get();
+
+            dataList.addAll(convertStreamToDataList(resultData));
+        } catch(Exception e){
+            Log.e(TAG, "Interrupted Exception");
+        }
+
+        Log.e(TAG,myEmulatorId+":::"+dataList.size());
+
+        return dataList;
+
+    }
+
+
+    private DataMessageModel queryDataFromRing(DataMessageModel dataMessageModel){
+
+        String targetNode = lookUpDataPosition(dataMessageModel);
+        String[] mColumns = {"key", "value"};
+        DataMessageModel resultModel = new DataMessageModel();
+
+        FileInputStream inputStream;
+
+        if (targetNode.equals(myEmulatorId)) {
+            try {
+                inputStream = getContext().openFileInput(dataMessageModel.getKey());
+                BufferedReader rd = new BufferedReader(new InputStreamReader(inputStream));
+                String mValues = rd.readLine();
+
+                Log.e(TAG,"file name::" + dataMessageModel.getKey());
+                dataMessageModel.setMessage(mValues);
+                resultModel = dataMessageModel;
+
+
+            }catch (FileNotFoundException e) {
+                Log.e(TAG, "File not found");
+            }catch (IOException e){
+                Log.e(TAG, "IO Exception");
+            }
+        } else {
+            try {
+                String resultData = new ClientTaskDataList().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, dataMessageModel.createDataStream()).get();
+
+                resultModel.createDataModel(resultData.trim().split("~"));
+
+            } catch(Exception e){
+                Log.e(TAG, "Interrupted Exception");
+            }
+
+
+        }
+        return resultModel;
+    }
 
 }

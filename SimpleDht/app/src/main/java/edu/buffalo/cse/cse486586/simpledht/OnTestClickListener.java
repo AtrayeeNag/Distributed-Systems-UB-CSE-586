@@ -13,7 +13,7 @@ import android.widget.TextView;
 public class OnTestClickListener implements OnClickListener {
 
 	private static final String TAG = OnTestClickListener.class.getName();
-	private static final int TEST_CNT = 5;
+	private static final int TEST_CNT = 1;
 	private static final String KEY_FIELD = "key";
 	private static final String VALUE_FIELD = "value";
 
@@ -40,7 +40,8 @@ public class OnTestClickListener implements OnClickListener {
 		ContentValues[] cv = new ContentValues[TEST_CNT];
 		for (int i = 0; i < TEST_CNT; i++) {
 			cv[i] = new ContentValues();
-			cv[i].put(KEY_FIELD, "key" + Integer.toString(i));
+//			cv[i].put(KEY_FIELD, "key" + Integer.toString(i));
+			cv[i].put(KEY_FIELD, "we7zB6pPILuNq9ys8O3hnH2ITnCo8oau");
 			cv[i].put(VALUE_FIELD, "val" + Integer.toString(i));
 		}
 
