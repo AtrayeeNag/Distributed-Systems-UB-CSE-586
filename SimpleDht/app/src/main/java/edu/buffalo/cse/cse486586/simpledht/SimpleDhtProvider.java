@@ -32,14 +32,12 @@ public class SimpleDhtProvider extends ContentProvider {
 
     static final int SERVER_PORT = 10000;
     static final Integer LEADER_NODE_PORT = 11108;
-    static final Integer LEADER_NODE_ID = 5554;
 
     String myEmulatorId = null;
     String myPort = null;
     String successorId = null;
     String predecessorId = null;
     TreeSet<NodeMessageModel> nodeSet = new TreeSet<NodeMessageModel>();
-
 
 
     @Override
@@ -59,7 +57,6 @@ public class SimpleDhtProvider extends ContentProvider {
 
     @Override
     public Uri insert(Uri uri, ContentValues values) {
-        // TODO Auto-generated method stub
 
         String dataKey = (String) values.get("key");
         String dataValue = (String) values.get("value");
@@ -76,13 +73,14 @@ public class SimpleDhtProvider extends ContentProvider {
             } else {
 
                 dataMessageModel.setTargetNode(targetNode);
-                new ClientTaskData().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, dataMessageModel);
+                new ClientTaskDataList().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, dataMessageModel.createDataStream());
             }
         }
 
         Log.v("insert", values.toString());
         return uri;
     }
+
 
     @Override
     public boolean onCreate() {
@@ -113,10 +111,10 @@ public class SimpleDhtProvider extends ContentProvider {
 
     }
 
+
     @Override
     public Cursor query(Uri uri, String[] projection, String selection, String[] selectionArgs,
                         String sortOrder) {
-        // TODO Auto-generated method stub
 
         String[] mColumns = {"key", "value"};
 
@@ -144,7 +142,6 @@ public class SimpleDhtProvider extends ContentProvider {
                         mCursor.newRow()
                                 .add("key", file)
                                 .add("value", mValues);
-
 
                     } catch (FileNotFoundException e) {
                         Log.e(TAG, "File not found");
@@ -202,10 +199,7 @@ public class SimpleDhtProvider extends ContentProvider {
 
         } else{
 
-
-
             DataMessageModel dataMessageModel = new DataMessageModel(selection, null, DhtOperationTypeConstant.DATA_QUERY, null, myEmulatorId, myEmulatorId);
-
 
             String targetNode = lookUpDataPosition(dataMessageModel);
 
@@ -251,11 +245,13 @@ public class SimpleDhtProvider extends ContentProvider {
 
     }
 
+
     @Override
     public int update(Uri uri, ContentValues values, String selection, String[] selectionArgs) {
         // TODO Auto-generated method stub
         return 0;
     }
+
 
     private class ServerTask extends AsyncTask<ServerSocket, String, Void> {
 
@@ -299,7 +295,6 @@ public class SimpleDhtProvider extends ContentProvider {
 
                             }
 
-
                         } else if(strReceivedArr[0].equalsIgnoreCase("Data")){
 
                             if(strReceivedArr.length >1) {
@@ -314,7 +309,7 @@ public class SimpleDhtProvider extends ContentProvider {
                                     insertDataToRing(dataMessageModel);
 
                                 } else if (DhtOperationTypeConstant.DATA_QUERY.equalsIgnoreCase(dataMessageModel.getDataOperationType())) {
-                                    // TODO for query
+
                                     DataMessageModel resultModel = queryDataFromRing(dataMessageModel);
 
                                     DataOutputStream out = new DataOutputStream(socket.getOutputStream());
@@ -322,51 +317,39 @@ public class SimpleDhtProvider extends ContentProvider {
                                     out.flush();
                                     out.close();
 
-                                } else {
-                                    // TODO for delete
-                                }
-                            }
+                                } else if(DhtOperationTypeConstant.DATA_QUERY_GLOBAL.equalsIgnoreCase(dataMessageModel.getDataOperationType())) {
+
+                                    // query all data
+
+                                    Log.d(TAG,"get msg::"+line);
+                                    Log.d(TAG,"my id::"+myEmulatorId);
 
 
-                        } else{
+                                    if(dataMessageModel.getOriginNode().equalsIgnoreCase(myEmulatorId)){
 
-                            // query all data
+                                        DataOutputStream out = new DataOutputStream(socket.getOutputStream());
+                                        out.writeUTF(" ");
+                                        out.flush();
+                                        out.close();
 
-                            Log.d(TAG,"get msg::"+line);
-                            Log.d(TAG,"my id::"+myEmulatorId);
+                                    } else{
 
-                            if(strReceivedArr[0].equalsIgnoreCase(DhtOperationTypeConstant.DATA_QUERY)){
+                                        List<DataMessageModel> dataList = queryAllDataFromRing(dataMessageModel.getOriginNode());
 
-                                if(strReceivedArr[1].equalsIgnoreCase(myEmulatorId)){
+                                        DataOutputStream out = new DataOutputStream(socket.getOutputStream());
+                                        out.writeUTF(convertDataListToStream(dataList));
+                                        out.flush();
+                                        out.close();
 
-                                    DataOutputStream out = new DataOutputStream(socket.getOutputStream());
-                                    out.writeUTF(" ");
-                                    out.flush();
-                                    out.close();
-
-                                } else{
-
-                                    List<DataMessageModel> dataList = queryAllDataFromRing(strReceivedArr[1]);
-
-                                    DataOutputStream out = new DataOutputStream(socket.getOutputStream());
-                                    out.writeUTF(convertDataListToStream(dataList));
-                                    out.flush();
-                                    out.close();
-
+                                    }
 
                                 }
 
-
                             }
-
-
-
-
 
                         }
 
                     }
-
 
                     socket.close();
                 }
@@ -404,16 +387,6 @@ public class SimpleDhtProvider extends ContentProvider {
                 PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
                 out.println(nodeMessageModel.createNodeStream());
 
-
-//                DataInputStream ds = new DataInputStream(socket.getInputStream());
-//                String ack = ds.readUTF();
-//
-//
-//                if (ack.equals("Acknowledge")) {
-//                    Log.e(TAG, "Ack received");
-//                }
-
-
                 socket.close();
 
             } catch (UnknownHostException e) {
@@ -425,82 +398,45 @@ public class SimpleDhtProvider extends ContentProvider {
             return null;
         }
     }
-
-
-    private class ClientTaskData extends AsyncTask<DataMessageModel, Void, Void> {
-
-        @Override
-        protected Void doInBackground(DataMessageModel... data) {
-            try {
-
-                DataMessageModel dataMessageModel = data[0];
-
-                Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), Integer.parseInt(dataMessageModel.getTargetNode())*2);
-
-                PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
-                out.println(dataMessageModel.createDataStream());
-
-
-
-
-               socket.close();
-
-
-//                DataInputStream ds = new DataInputStream(socket.getInputStream());
-//                String ack = ds.readUTF();
-//
-//
-//                if (ack.equals("Acknowledge")) {
-//                    Log.e(TAG, "Ack received");
-//                }
-
-
-
-
-            } catch (UnknownHostException e) {
-                Log.e(TAG, "ClientTask UnknownHostException");
-            } catch (IOException e) {
-                Log.e(TAG, "ClientTask socket IOException");
-            }
-
-            return null;
-        }
-
-    }
-
 
 
     private class ClientTaskDataList extends AsyncTask<String, Void, String> {
 
         @Override
-        protected String doInBackground(String... query) {
+        protected String doInBackground(String... line) {
 
             String result = "";
             try {
 
+                String strReceived = line[0].trim();
+                Log.d(TAG, "recieved::" + strReceived);
+                String[] strReceivedArr = strReceived.split("~");
 
-                Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), Integer.parseInt(successorId)*2);
+                DataMessageModel dataMessageModel = new DataMessageModel();
+                dataMessageModel.createDataModel(strReceivedArr);
 
-//                socket.setSoTimeout(3000);
-                PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
-                out.println(query[0]);
+                if(dataMessageModel.getDataOperationType().equalsIgnoreCase(DhtOperationTypeConstant.DATA_INSERT)){
 
-                //socket.close();
+                    Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), Integer.parseInt(dataMessageModel.getTargetNode())*2);
 
+                    PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+                    out.println(dataMessageModel.createDataStream());
 
+                    socket.close();
 
-                DataInputStream ds = new DataInputStream(socket.getInputStream());
-                result = ds.readUTF();
+                } else{
+                    Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), Integer.parseInt(successorId)*2);
 
+                    PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+                    out.println(line[0]);
 
-//                if (ack.equals("Acknowledge")) {
-//                    Log.e(TAG, "Ack received");
-//                }
-                ds.close();
-                socket.close();
+                    DataInputStream ds = new DataInputStream(socket.getInputStream());
+                    result = ds.readUTF();
 
+                    ds.close();
+                    socket.close();
 
-
+                }
 
             } catch (UnknownHostException e) {
                 Log.e(TAG, "ClientTask UnknownHostException");
@@ -603,7 +539,6 @@ public class SimpleDhtProvider extends ContentProvider {
     }
 
 
-
     private void insertDataToRing(DataMessageModel dataMessageModel) {
 
         String targetNode = lookUpDataPosition(dataMessageModel);
@@ -615,29 +550,27 @@ public class SimpleDhtProvider extends ContentProvider {
         }else {
 
             dataMessageModel.setTargetNode(targetNode);
-            new ClientTaskData().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, dataMessageModel);
+            new ClientTaskDataList().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, dataMessageModel.createDataStream());
         }
 
     }
 
 
-
     private void insertDatatoLocal(DataMessageModel dataMessageModel){
 
-            FileOutputStream outputStream;
+        FileOutputStream outputStream;
 
-            try {
+        try {
 
-                outputStream = getContext().openFileOutput(dataMessageModel.getKey(), Context.MODE_PRIVATE);
-                outputStream.write(dataMessageModel.getMessage().getBytes());
-                outputStream.close();
+            outputStream = getContext().openFileOutput(dataMessageModel.getKey(), Context.MODE_PRIVATE);
+            outputStream.write(dataMessageModel.getMessage().getBytes());
+            outputStream.close();
 
-            } catch (Exception e) {
-                Log.e(TAG, "File write failed");
-            }
+        } catch (Exception e) {
+            Log.e(TAG, "File write failed");
+        }
 
     }
-
 
 
     private String lookUpDataPosition(DataMessageModel dataMessageModel){
@@ -682,6 +615,7 @@ public class SimpleDhtProvider extends ContentProvider {
         }
         return null;
     }
+
 
     private String convertDataListToStream(List<DataMessageModel> dataList){
 
@@ -733,6 +667,7 @@ public class SimpleDhtProvider extends ContentProvider {
 
     }
 
+
     private List<DataMessageModel> queryAllDataFromRing(String originId){
 
         FileInputStream inputStream;
@@ -761,10 +696,10 @@ public class SimpleDhtProvider extends ContentProvider {
 
         }
 
-        String stream = DhtOperationTypeConstant.DATA_QUERY + "~" + originId;
+        DataMessageModel dataMessageModel = new DataMessageModel(null, null, DhtOperationTypeConstant.DATA_QUERY_GLOBAL, null,null, originId);
 
         try {
-            String resultData = new ClientTaskDataList().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, stream).get();
+            String resultData = new ClientTaskDataList().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, dataMessageModel.createDataStream()).get();
 
             dataList.addAll(convertStreamToDataList(resultData));
         } catch(Exception e){
