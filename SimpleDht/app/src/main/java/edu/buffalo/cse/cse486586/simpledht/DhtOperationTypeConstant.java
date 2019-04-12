@@ -9,5 +9,6 @@ public class DhtOperationTypeConstant {
     public static final String DATA_QUERY_GLOBAL = "DATA_QUERY_GLOBAL";
     public static final String DATA_QUERY = "DATA_QUERY";
     public static final String DATA_DELETE = "DATA_DELETE";
+    public static final String DATA_DELETE_GLOBAL = "DATA_DELETE_GLOBAL";
 
 }

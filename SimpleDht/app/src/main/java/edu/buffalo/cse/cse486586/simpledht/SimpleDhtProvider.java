@@ -20,7 +20,6 @@ import android.database.Cursor;
 import android.database.MatrixCursor;
 import android.net.Uri;
 import android.os.AsyncTask;
-import android.provider.ContactsContract;
 import android.telephony.TelephonyManager;
 import android.util.Log;
 import java.util.*;
@@ -44,7 +43,49 @@ public class SimpleDhtProvider extends ContentProvider {
     public int delete(Uri uri, String selection, String[] selectionArgs) {
         // TODO Auto-generated method stub
 
-        getContext().deleteFile(selection);
+        if(selection.equals("*")){
+
+            if(myEmulatorId.equals(successorId) && myEmulatorId.equals(predecessorId)) {
+
+                String[] fileNames = getContext().fileList();
+                for (String file : fileNames) {
+
+                    getContext().deleteFile(file);
+
+                }
+
+            } else{
+
+                deleteAllDataFromRing(myEmulatorId);
+
+            }
+
+        } else if(selection.equals("@")) {
+
+            String[] fileNames = getContext().fileList();
+            for (String file : fileNames) {
+
+                getContext().deleteFile(file);
+
+            }
+
+        } else{
+            DataMessageModel dataMessageModel = new DataMessageModel(selection, null, DhtOperationTypeConstant.DATA_DELETE, null, myEmulatorId, myEmulatorId);
+
+            String targetNode = lookUpDataPosition(dataMessageModel);
+
+            if (targetNode.equals(myEmulatorId)) {
+
+                getContext().deleteFile(selection);
+
+            } else {
+
+                dataMessageModel.setTargetNode(targetNode);
+                deleteDataFromRing(dataMessageModel);
+
+            }
+
+        }
 
         return 0;
     }
@@ -343,6 +384,17 @@ public class SimpleDhtProvider extends ContentProvider {
 
                                     }
 
+                                } else if(DhtOperationTypeConstant.DATA_DELETE.equalsIgnoreCase(dataMessageModel.getDataOperationType())){
+
+                                    deleteDataFromRing(dataMessageModel);
+
+                                } else if(DhtOperationTypeConstant.DATA_DELETE_GLOBAL.equalsIgnoreCase(dataMessageModel.getDataOperationType())){
+
+                                    if(dataMessageModel.getOriginNode() != myEmulatorId) {
+
+                                        deleteAllDataFromRing(dataMessageModel.getOriginNode());
+
+                                    }
                                 }
 
                             }
@@ -424,7 +476,8 @@ public class SimpleDhtProvider extends ContentProvider {
 
                     socket.close();
 
-                } else{
+                } else if(dataMessageModel.getDataOperationType().equalsIgnoreCase(DhtOperationTypeConstant.DATA_QUERY)
+                            || dataMessageModel.getDataOperationType().equalsIgnoreCase(DhtOperationTypeConstant.DATA_QUERY_GLOBAL)){
                     Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), Integer.parseInt(successorId)*2);
 
                     PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
@@ -434,6 +487,16 @@ public class SimpleDhtProvider extends ContentProvider {
                     result = ds.readUTF();
 
                     ds.close();
+                    socket.close();
+
+                } else if(dataMessageModel.getDataOperationType().equalsIgnoreCase(DhtOperationTypeConstant.DATA_DELETE)
+                            || dataMessageModel.getDataOperationType().equalsIgnoreCase(DhtOperationTypeConstant.DATA_DELETE_GLOBAL)){
+
+                    Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), Integer.parseInt(successorId)*2);
+
+                    PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+                    out.println(dataMessageModel.createDataStream());
+
                     socket.close();
 
                 }
@@ -460,6 +523,8 @@ public class SimpleDhtProvider extends ContentProvider {
 
     }
 
+
+    // Reference : NavigableSet-https://docs.oracle.com/javase/7/docs/api/java/util/NavigableSet.html
 
     private void joinNodeToRing(NodeMessageModel nodeMessageModel, TreeSet<NodeMessageModel> nodeSet){
 
@@ -681,7 +746,7 @@ public class SimpleDhtProvider extends ContentProvider {
                 BufferedReader rd = new BufferedReader(new InputStreamReader(inputStream));
                 String mValues = rd.readLine();
 
-                Log.e(TAG, "file name::" + file);
+                Log.i(TAG, "file name::" + file);
 
                 if(file != null && mValues != null) {
                     DataMessageModel dataMessageModel = new DataMessageModel(file, mValues, DhtOperationTypeConstant.DATA_QUERY, null, null, originId);
@@ -750,6 +815,38 @@ public class SimpleDhtProvider extends ContentProvider {
 
         }
         return resultModel;
+    }
+
+
+    private void deleteDataFromRing(DataMessageModel dataMessageModel){
+
+        String targetNode = lookUpDataPosition(dataMessageModel);
+
+        if(targetNode.equals(myEmulatorId)) {
+
+            getContext().deleteFile(dataMessageModel.getKey());
+
+        }else {
+
+            dataMessageModel.setTargetNode(targetNode);
+            new ClientTaskDataList().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, dataMessageModel.createDataStream());
+        }
+
+    }
+
+    private void deleteAllDataFromRing(String originId){
+
+        String[] fileNames = getContext().fileList();
+        for (String file : fileNames) {
+
+            getContext().deleteFile(file);
+
+        }
+
+        DataMessageModel dataMessageModel = new DataMessageModel(null, null, DhtOperationTypeConstant.DATA_DELETE_GLOBAL, null,null, originId);
+        new ClientTaskDataList().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, dataMessageModel.createDataStream());
+
+
     }
 
 }

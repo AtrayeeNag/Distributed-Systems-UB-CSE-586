@@ -43,24 +43,25 @@ public class OnGDumpClickListener implements View.OnClickListener {
         @Override
         protected Void doInBackground(Void... params) {
 
+            mContentResolver.delete(mUri, "key14",null);
 
-            Cursor resultCursor = mContentResolver.query(mUri, null,
-                    "*", null, null);
-
-            if (resultCursor.moveToFirst()) {
-
-                while (!resultCursor.isAfterLast()) {
-
-                    String data = resultCursor.getString(resultCursor.getColumnIndex(KEY_FIELD)) +
-                            "~" + resultCursor.getString(resultCursor.getColumnIndex(VALUE_FIELD));
-
-
-                    publishProgress(data);
-
-                    resultCursor.moveToNext();
-                }
-            }
-            resultCursor.close();
+//            Cursor resultCursor = mContentResolver.query(mUri, null,
+//                    "*", null, null);
+//
+//            if (resultCursor.moveToFirst()) {
+//
+//                while (!resultCursor.isAfterLast()) {
+//
+//                    String data = resultCursor.getString(resultCursor.getColumnIndex(KEY_FIELD)) +
+//                            "~" + resultCursor.getString(resultCursor.getColumnIndex(VALUE_FIELD));
+//
+//
+//                    publishProgress(data);
+//
+//                    resultCursor.moveToNext();
+//                }
+//            }
+//            resultCursor.close();
 
             return null;
         }
