@@ -1,0 +1,7 @@
+#Internal package file, do not edit.
+#Sun May 05 00:48:50 EDT 2019
+0.baseType=DIRECTORY
+0.base=/Users/atrayeenag/Documents/GitHub/Distributed-Systems-UB-CSE-586/SimpleDynamo/app/build/intermediates/dex/release/mergeDexRelease/out
+0.path=classes.dex
+0.set=DEX
+count=1
