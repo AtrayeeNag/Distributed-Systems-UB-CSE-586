@@ -26,6 +26,8 @@ import android.os.AsyncTask;
 import android.telephony.TelephonyManager;
 import android.util.Log;
 import java.util.Date;
+import java.net.SocketTimeoutException;
+import java.util.concurrent.Semaphore;
 
 public class SimpleDynamoProvider extends ContentProvider {
 
@@ -34,13 +36,12 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 	static final int SERVER_PORT = 10000;
 	static final String[] EMULATOR_ARR = {"5554", "5556", "5558", "5560", "5562"};
+    static Semaphore semaphore = new Semaphore(2);
 
 	String myEmulatorId = null;
 	String myPort = null;
 
 	TreeSet<DataMessageModel> nodeSet = new TreeSet<DataMessageModel>();
-
-
 
 	@Override
 	public int delete(Uri uri, String selection, String[] selectionArgs) {
@@ -90,6 +91,8 @@ public class SimpleDynamoProvider extends ContentProvider {
 					deleteDataFromLocal(dataMessageModel);
 
 				else {
+
+                    dataMessageModel.setTargetNode(node);
 
 					new ClientTaskDataList().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, dataMessageModel.createDataStream());
 
@@ -170,8 +173,19 @@ public class SimpleDynamoProvider extends ContentProvider {
 			nodeSet.add(dataMessageModel);
 		}
 
+		try {
+            semaphore.acquire();
+            recoverDataAfterFailure();
 
-		return false;
+        } catch (InterruptedException e) {
+
+            e.printStackTrace();
+
+        } finally {
+            semaphore.release();
+        }
+
+        return false;
 	}
 
 	@Override
@@ -375,8 +389,9 @@ public class SimpleDynamoProvider extends ContentProvider {
 			String result = "";
 			try {
 
+
 				String strReceived = line[0].trim();
-				Log.d(TAG, "recieved::" + strReceived);
+//				Log.d(TAG, "recieved::" + strReceived);
 				String[] strReceivedArr = strReceived.split("~");
 
 				DataMessageModel dataMessageModel = new DataMessageModel();
@@ -385,6 +400,8 @@ public class SimpleDynamoProvider extends ContentProvider {
 				if(dataMessageModel.getDataOperationType().equalsIgnoreCase(DhtOperationTypeConstant.DATA_INSERT)){
 
 					Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), Integer.parseInt(dataMessageModel.getTargetNode())*2);
+
+                    socket.setSoTimeout(1000);
 
 					PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
 					out.println(dataMessageModel.createDataStream());
@@ -395,6 +412,8 @@ public class SimpleDynamoProvider extends ContentProvider {
 						|| dataMessageModel.getDataOperationType().equalsIgnoreCase(DhtOperationTypeConstant.DATA_QUERY_GLOBAL)){
 
 					Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), Integer.parseInt(dataMessageModel.getTargetNode())*2);
+
+                    socket.setSoTimeout(1000);
 
 					PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
 					out.println(line[0]);
@@ -410,6 +429,8 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 					Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), Integer.parseInt(dataMessageModel.getTargetNode())*2);
 
+                    socket.setSoTimeout(1000);
+
 					PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
 					out.println(dataMessageModel.createDataStream());
 
@@ -417,7 +438,9 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 				}
 
-			} catch (UnknownHostException e) {
+			} catch (SocketTimeoutException e) {
+			    Log.e(TAG, "ClientTask SocketTimeoutException");
+            } catch (UnknownHostException e) {
 				Log.e(TAG, "ClientTask UnknownHostException");
 			} catch (IOException e) {
 				Log.e(TAG, "ClientTask socket IOException");
@@ -503,6 +526,33 @@ public class SimpleDynamoProvider extends ContentProvider {
             targetList.add(target2.getKey());
 
 
+
+
+            return targetList;
+
+        } catch(Exception e){
+            Log.e(TAG, "Error generating Hash");
+
+        }
+        return null;
+    }
+
+
+    private List<String> getNeighborList(DataMessageModel dataMessageModel){
+
+        List<String> targetList = new ArrayList<String>();
+
+        try {
+
+            DataMessageModel nextNode = nodeSet.higher(dataMessageModel) != null?
+                    nodeSet.higher(dataMessageModel): nodeSet.first();
+
+            targetList.add(nextNode.getKey());
+
+            DataMessageModel prevNode = nodeSet.lower(dataMessageModel) != null?
+                    nodeSet.lower(dataMessageModel): nodeSet.last();
+
+            targetList.add(prevNode.getKey());
 
 
             return targetList;
@@ -605,7 +655,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 			List<DataMessageModel> dataList = new ArrayList<DataMessageModel>();
 			String strReceived = stream.trim();
 
-			Log.d(TAG, "recieved::" + strReceived);
+//			Log.d(TAG, "recieved::" + strReceived);
 			String[] strReceivedArr = strReceived.split("#");
 
 			for(String dataString : strReceivedArr){
@@ -655,8 +705,11 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 		Collections.sort(dataList, new Comparator<DataMessageModel>(){
 			public int compare(DataMessageModel d1, DataMessageModel d2) {
-				return d1.getKey().equals(d2.getKey()) && d1.insertTimeStamp < d2.insertTimeStamp?-1:
-						d1.getKey().equals(d2.getKey()) && d1.insertTimeStamp > d2.insertTimeStamp?1:0;
+                int keyCmp = d1.getKey().compareTo(d2.getKey());
+                if (keyCmp != 0) {
+                    return keyCmp;
+                }
+                return Long.compare(d1.getInsertTimeStamp(), d2.getInsertTimeStamp());
 			}
 		});
 
@@ -684,15 +737,13 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 	private void deleteDataFromLocal(DataMessageModel dataMessageModel){
 
-		if(dataMessageModel.getDataOperationType().equals(DhtOperationTypeConstant.DATA_QUERY_GLOBAL)
-				|| dataMessageModel.getDataOperationType().equals(DhtOperationTypeConstant.DATA_QUERY_LOCAL)){
+		if(dataMessageModel.getDataOperationType().equals(DhtOperationTypeConstant.DATA_DELETE_GLOBAL)
+				|| dataMessageModel.getDataOperationType().equals(DhtOperationTypeConstant.DATA_DELETE_LOCAL)){
 
 			String[] fileNames = getContext().fileList();
 
 			for (String file : fileNames)
 				getContext().deleteFile(file);
-
-
 
 		} else{
 
@@ -710,6 +761,44 @@ public class SimpleDynamoProvider extends ContentProvider {
 		}
 
 	}
+
+
+
+    private synchronized void recoverDataAfterFailure(){
+
+        DataMessageModel messageModelForDelete = new DataMessageModel(myEmulatorId, null, DhtOperationTypeConstant.DATA_DELETE_LOCAL, null, myEmulatorId, null, 0L);
+        deleteDataFromLocal(messageModelForDelete);
+
+        List<String> targetList = getNeighborList(messageModelForDelete);
+        List<DataMessageModel> dataList = new ArrayList<DataMessageModel>();
+        List<DataMessageModel> filteredList = new ArrayList<DataMessageModel>();
+
+        for(String target : targetList){
+
+            DataMessageModel msgModelForRetrieval = new DataMessageModel(null, null, DhtOperationTypeConstant.DATA_QUERY_GLOBAL, null, target, null, 0L);
+
+            try {
+                String resultData = new ClientTaskDataList().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, msgModelForRetrieval.createDataStream()).get();
+
+                dataList.addAll(convertStreamToDataList(resultData));
+            }
+            catch(Exception e){
+                Log.e(TAG, "Interrupted Exception");
+            }
+
+        }
+        filteredList.addAll(filterPrevVersions(dataList));
+
+        for(DataMessageModel data : filteredList){
+
+            List<String> targets = getTargetList(data);
+
+            if(targets.contains(myEmulatorId))
+                insertDatatoLocal(data);
+
+
+        }
+    }
 
 
 
