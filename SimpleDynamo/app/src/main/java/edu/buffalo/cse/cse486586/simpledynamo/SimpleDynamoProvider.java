@@ -27,7 +27,9 @@ import android.telephony.TelephonyManager;
 import android.util.Log;
 import java.util.Date;
 import java.net.SocketTimeoutException;
-import java.util.concurrent.Semaphore;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public class SimpleDynamoProvider extends ContentProvider {
 
@@ -36,12 +38,16 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 	static final int SERVER_PORT = 10000;
 	static final String[] EMULATOR_ARR = {"5554", "5556", "5558", "5560", "5562"};
-    static Semaphore semaphore = new Semaphore(2);
 
 	String myEmulatorId = null;
 	String myPort = null;
 
 	TreeSet<DataMessageModel> nodeSet = new TreeSet<DataMessageModel>();
+
+    ReadWriteLock lock = new ReentrantReadWriteLock();
+    Lock writeLock = lock.writeLock();
+
+    Lock readLock = lock.readLock();
 
 	@Override
 	public int delete(Uri uri, String selection, String[] selectionArgs) {
@@ -55,17 +61,17 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 
 
-				if(node.getKey().equals(myEmulatorId))
-					deleteDataFromLocal(dataMessageModel);
-
-				else {
+//				if(node.getKey().equals(myEmulatorId))
+//					deleteDataFromLocal(dataMessageModel);
+//
+//				else {
 					try {
 						new ClientTaskDataList().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, dataMessageModel.createDataStream());
 					}
 					catch(Exception e){
-						Log.e(TAG, "Interrupted Exception");
+						Log.e(TAG, "Interrupted Exception in delete");
 					}
-				}
+//				}
 
 			}
 
@@ -87,16 +93,16 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 			for (String node : targetList) {
 
-				if (node.equals(myEmulatorId))
-					deleteDataFromLocal(dataMessageModel);
+//				if (node.equals(myEmulatorId))
+//					deleteDataFromLocal(dataMessageModel);
 
-				else {
+//				else {
 
                     dataMessageModel.setTargetNode(node);
 
 					new ClientTaskDataList().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, dataMessageModel.createDataStream());
 
-				}
+//				}
 
 
 			}
@@ -121,31 +127,18 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 		DataMessageModel dataMessageModel = new DataMessageModel(dataKey, dataValue, DhtOperationTypeConstant.DATA_INSERT, null, myEmulatorId, myEmulatorId, insertTimeStamp);
 
-//		try {
-//			Log.e(TAG, "+++++++HASH KEY+++++++"+SimpleDhtUtil.genHash(dataKey));
-//
-//			for(String emulatorId : EMULATOR_ARR){
-//				Log.e(TAG, "+++++++HASH "+emulatorId+"+++++++"+SimpleDhtUtil.genHash(emulatorId));
-//			}
-//
-//		} catch (Exception e){
-//
-//		}
-//		String targetNode = lookUpDataPosition(dataMessageModel);
-//
-//		Log.i(TAG, "+++KEY+++"+dataKey+"+++TARGET+++"+targetNode);
 
         List<String> targetList = getTargetList(dataMessageModel);
 
 		for(String target : targetList) {
 
-			if(target.equals(myEmulatorId))
-				insertDatatoLocal(dataMessageModel);
-
-			else{
+//			if(target.equals(myEmulatorId))
+//				insertDatatoLocal(dataMessageModel);
+//
+//			else{
 				dataMessageModel.setTargetNode(target);
 				new ClientTaskDataList().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, dataMessageModel.createDataStream());
-			}
+//			}
 		}
 
 		Log.v("insert", values.toString());
@@ -157,6 +150,12 @@ public class SimpleDynamoProvider extends ContentProvider {
 		TelephonyManager tel = (TelephonyManager) this.getContext().getSystemService(Context.TELEPHONY_SERVICE);
 		myEmulatorId = tel.getLine1Number().substring(tel.getLine1Number().length() - 4);
 		myPort = String.valueOf(Integer.parseInt(myEmulatorId) * 2);
+
+
+
+        lock = new ReentrantReadWriteLock();
+        writeLock = lock.writeLock();
+        readLock = lock.readLock();
 
 		try {
 
@@ -173,17 +172,9 @@ public class SimpleDynamoProvider extends ContentProvider {
 			nodeSet.add(dataMessageModel);
 		}
 
-		try {
-            semaphore.acquire();
-            recoverDataAfterFailure();
 
-        } catch (InterruptedException e) {
+		recoverDataAfterFailure();
 
-            e.printStackTrace();
-
-        } finally {
-            semaphore.release();
-        }
 
         return false;
 	}
@@ -207,19 +198,19 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 
 
-				if(node.getKey().equals(myEmulatorId))
-					dataList.addAll(queryDataFromLocal(dataMessageModel));
-
-				else {
+//				if(node.getKey().equals(myEmulatorId))
+//					dataList.addAll(queryDataFromLocal(dataMessageModel));
+//
+//				else {
 					try {
 						String resultData = new ClientTaskDataList().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, dataMessageModel.createDataStream()).get();
 
 						dataList.addAll(convertStreamToDataList(resultData));
 					}
 					catch(Exception e){
-						Log.e(TAG, "Interrupted Exception");
+						Log.e(TAG, "Interrupted Exception in query *");
 					}
-				}
+//				}
 
 			}
 
@@ -262,20 +253,30 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 			for(String node : targetList){
 
-				if(node.equals(myEmulatorId))
-					dataList.addAll(queryDataFromLocal(dataMessageModel));
-
-				else{
+//				if(node.equals(myEmulatorId))
+//					dataList.addAll(queryDataFromLocal(dataMessageModel));
+//
+//				else{
 					try {
 
 						dataMessageModel.setTargetNode(node);
 						String resultData = new ClientTaskDataList().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, dataMessageModel.createDataStream()).get();
-						dataList.addAll(convertStreamToDataList(resultData));
+
+
+						List<DataMessageModel> temList = convertStreamToDataList(resultData);
+
+//						if(temList.size()==0){
+//                            Log.e(TAG, "No data returned: " + selection);
+//
+//
+//                        }
+
+						dataList.addAll(temList);
 
 					} catch(Exception e){
-						Log.e(TAG, "Interrupted Exception");
+						Log.e(TAG, "Interrupted Exception in query key");
 					}
-				}
+//				}
 
 
 			}
@@ -401,7 +402,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 					Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), Integer.parseInt(dataMessageModel.getTargetNode())*2);
 
-                    socket.setSoTimeout(1000);
+                    socket.setSoTimeout(2000);
 
 					PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
 					out.println(dataMessageModel.createDataStream());
@@ -413,7 +414,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 					Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), Integer.parseInt(dataMessageModel.getTargetNode())*2);
 
-                    socket.setSoTimeout(1000);
+                    socket.setSoTimeout(2000);
 
 					PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
 					out.println(line[0]);
@@ -429,7 +430,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 					Socket socket = new Socket(InetAddress.getByAddress(new byte[]{10, 0, 2, 2}), Integer.parseInt(dataMessageModel.getTargetNode())*2);
 
-                    socket.setSoTimeout(1000);
+                    socket.setSoTimeout(2000);
 
 					PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
 					out.println(dataMessageModel.createDataStream());
@@ -525,9 +526,6 @@ public class SimpleDynamoProvider extends ContentProvider {
 
             targetList.add(target2.getKey());
 
-
-
-
             return targetList;
 
         } catch(Exception e){
@@ -566,19 +564,57 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 	private void insertDatatoLocal(DataMessageModel dataMessageModel){
 
-		FileOutputStream outputStream;
+			try {
 
-		try {
+                writeLock.lock();
 
-			outputStream = getContext().openFileOutput(dataMessageModel.getKey() +'~'+Long.toString(dataMessageModel.getInsertTimeStamp()), Context.MODE_PRIVATE);
-			outputStream.write(dataMessageModel.getMessage().getBytes());
-			outputStream.close();
+                FileOutputStream outputStream;
 
-		} catch (Exception e) {
-			Log.e(TAG, "File write failed");
-		}
+				outputStream = getContext().openFileOutput(dataMessageModel.getKey() +'~'+Long.toString(dataMessageModel.getInsertTimeStamp()), Context.MODE_PRIVATE);
+				outputStream.write(dataMessageModel.getMessage().getBytes());
+				outputStream.close();
+
+			} catch (Exception e) {
+				Log.e(TAG, "File write failed");
+			} finally {
+			    writeLock.unlock();
+            }
+
 
 	}
+
+
+    private void insertDataListtoLocal(List<DataMessageModel> dataMessageModelList){
+
+        try {
+
+            writeLock.lock();
+
+            for(DataMessageModel data : dataMessageModelList){
+
+                List<String> targets = getTargetList(data);
+
+                if(targets.contains(myEmulatorId)){
+
+                    FileOutputStream outputStream;
+
+                    outputStream = getContext().openFileOutput(data.getKey() +'~'+Long.toString(data.getInsertTimeStamp()), Context.MODE_PRIVATE);
+                    outputStream.write(data.getMessage().getBytes());
+                    outputStream.close();
+
+                }
+
+            }
+
+
+        } catch (Exception e) {
+            Log.e(TAG, "File write failed");
+        } finally {
+            writeLock.unlock();
+        }
+
+
+    }
 
 //	private NodeMessageModel searchNode(TreeSet<NodeMessageModel> nodeSet, NodeMessageModel key) {
 //
@@ -590,6 +626,9 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 
 	private List<DataMessageModel> queryDataFromLocal(DataMessageModel dataMessageModel) {
+
+
+        readLock.lock();
 
 		FileInputStream inputStream;
 		List<DataMessageModel> dataList = new ArrayList<DataMessageModel>();
@@ -642,6 +681,9 @@ public class SimpleDynamoProvider extends ContentProvider {
 				}
 			}
 		}
+
+
+        readLock.unlock();
 
 		return filterPrevVersions(dataList);
 
@@ -737,6 +779,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 	private void deleteDataFromLocal(DataMessageModel dataMessageModel){
 
+        writeLock.lock();
 		if(dataMessageModel.getDataOperationType().equals(DhtOperationTypeConstant.DATA_DELETE_GLOBAL)
 				|| dataMessageModel.getDataOperationType().equals(DhtOperationTypeConstant.DATA_DELETE_LOCAL)){
 
@@ -759,12 +802,13 @@ public class SimpleDynamoProvider extends ContentProvider {
 			}
 
 		}
+        writeLock.unlock();
 
 	}
 
 
 
-    private synchronized void recoverDataAfterFailure(){
+    private void recoverDataAfterFailure(){
 
         DataMessageModel messageModelForDelete = new DataMessageModel(myEmulatorId, null, DhtOperationTypeConstant.DATA_DELETE_LOCAL, null, myEmulatorId, null, 0L);
         deleteDataFromLocal(messageModelForDelete);
@@ -783,21 +827,13 @@ public class SimpleDynamoProvider extends ContentProvider {
                 dataList.addAll(convertStreamToDataList(resultData));
             }
             catch(Exception e){
-                Log.e(TAG, "Interrupted Exception");
+                Log.e(TAG, "Interrupted Exception recovery");
             }
 
         }
         filteredList.addAll(filterPrevVersions(dataList));
 
-        for(DataMessageModel data : filteredList){
-
-            List<String> targets = getTargetList(data);
-
-            if(targets.contains(myEmulatorId))
-                insertDatatoLocal(data);
-
-
-        }
+        insertDataListtoLocal(filteredList);
     }
 
 
