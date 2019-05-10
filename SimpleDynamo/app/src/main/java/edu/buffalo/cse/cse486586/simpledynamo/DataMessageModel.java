@@ -133,5 +133,16 @@ public class DataMessageModel implements Comparable<DataMessageModel>{
     }
 
 
-
+    @Override
+    public String toString() {
+        return "DataMessageModel{" +
+                "key='" + key + '\'' +
+                ", message='" + message + '\'' +
+                ", dataOperationType='" + dataOperationType + '\'' +
+                ", position='" + position + '\'' +
+                ", targetNode='" + targetNode + '\'' +
+                ", originNode='" + originNode + '\'' +
+                ", insertTimeStamp=" + insertTimeStamp +
+                '}';
+    }
 }
