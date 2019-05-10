@@ -4,8 +4,6 @@ import java.io.BufferedReader;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.FileInputStream;
-import java.io.FileNotFoundException;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
@@ -19,6 +17,7 @@ import java.util.TreeSet;
 import android.content.ContentProvider;
 import android.content.ContentValues;
 import android.content.Context;
+import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.database.MatrixCursor;
 import android.net.Uri;
@@ -27,11 +26,9 @@ import android.os.Handler;
 import android.os.Looper;
 import android.telephony.TelephonyManager;
 import android.util.Log;
-import android.widget.TextView;
 
 import java.util.Date;
 import java.net.SocketTimeoutException;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -114,13 +111,9 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 		for(String target : targetList) {
 
-//			if(target.equals(myEmulatorId))
-//				insertDatatoLocal(dataMessageModel);
-//
-//			else{
-				dataMessageModel.setTargetNode(target);
-				new ClientTaskDataList().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, dataMessageModel.createDataStream());
-//			}
+            dataMessageModel.setTargetNode(target);
+            new ClientTaskDataList().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, dataMessageModel.createDataStream());
+
 		}
 
 		Log.v("insert", values.toString());
@@ -150,21 +143,15 @@ public class SimpleDynamoProvider extends ContentProvider {
 			Log.e(TAG, "Can't create a ServerSocket");
 		}
 
-
 		for(String emulatorId : EMULATOR_ARR){
 			DataMessageModel dataMessageModel = new DataMessageModel(emulatorId);
 			nodeSet.add(dataMessageModel);
 		}
 
-
-//		recoverDataAfterFailure();
-
         final Handler mainHandler = new Handler(Looper.getMainLooper());
-
         mainHandler.post(new SyncMessagesJob(mainHandler));
 
-
-        return false;
+        return true;
 	}
 
 	@Override
@@ -178,27 +165,18 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 
 		if(selection.equals("*")){
-
-
 			for(DataMessageModel node : nodeSet){
 
 				DataMessageModel dataMessageModel = new DataMessageModel(null, null, DhtOperationTypeConstant.DATA_QUERY_GLOBAL, null, node.getKey(), null, 0L);
 
+                try {
+                    String resultData = new ClientTaskDataList().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, dataMessageModel.createDataStream()).get();
 
-
-//				if(node.getKey().equals(myEmulatorId))
-//					dataList.addAll(queryDataFromLocal(dataMessageModel));
-//
-//				else {
-					try {
-						String resultData = new ClientTaskDataList().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, dataMessageModel.createDataStream()).get();
-
-						dataList.addAll(convertStreamToDataList(resultData));
-					}
-					catch(Exception e){
-						Log.e(TAG, "Interrupted Exception in query *");
-					}
-//				}
+                    dataList.addAll(convertStreamToDataList(resultData));
+                }
+                catch(Exception e){
+                    Log.e(TAG, "Interrupted Exception in query *");
+                }
 
 			}
 
@@ -215,29 +193,12 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 		} else if(selection.equals("@")){
 
-//			DataMessageModel dataMessageModel = new DataMessageModel(null, null, DhtOperationTypeConstant.DATA_QUERY_LOCAL, null, myEmulatorId, null, 0L);
-//
-//			dataList.addAll(queryDataFromLocal(dataMessageModel));
-//
-//			filteredList.addAll(filterPrevVersions(dataList));
-//
-//			for(DataMessageModel data : filteredList) {
-//				mCursor.newRow()
-//						.add("key", data.getKey())
-//						.add("value", data.getMessage());
-//			}
-//
-//			return mCursor;
-
-
-
             List<String> targetList = getReplicaTargetList(myEmulatorId);
 
 
             for(String tg : targetList){
 
                 DataMessageModel dataMessageModel = new DataMessageModel(null, null, DhtOperationTypeConstant.DATA_QUERY_GLOBAL, null, tg, null, 0L);
-
 
                 try {
                     String resultData = new ClientTaskDataList().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, dataMessageModel.createDataStream()).get();
@@ -287,39 +248,22 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 			DataMessageModel dataMessageModel = new DataMessageModel(selection, null, DhtOperationTypeConstant.DATA_QUERY_KEY, null, null, myEmulatorId, 0L);
 
-//			String targetNode = lookUpDataPosition(dataMessageModel);
-
-//			Log.i(TAG, "+++KEY+++"+selection+"+++TARGET+++"+targetNode);
-
 			List<String> targetList = getTargetList(dataMessageModel);
 
 			for(String node : targetList){
 
-//				if(node.equals(myEmulatorId))
-//					dataList.addAll(queryDataFromLocal(dataMessageModel));
-//
-//				else{
-					try {
+                try {
 
-						dataMessageModel.setTargetNode(node);
-						String resultData = new ClientTaskDataList().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, dataMessageModel.createDataStream()).get();
+                    dataMessageModel.setTargetNode(node);
+                    String resultData = new ClientTaskDataList().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR, dataMessageModel.createDataStream()).get();
 
+                    List<DataMessageModel> temList = convertStreamToDataList(resultData);
 
-						List<DataMessageModel> temList = convertStreamToDataList(resultData);
+                    dataList.addAll(temList);
 
-//						if(temList.size()==0){
-//                            Log.e(TAG, "No data returned: " + selection);
-//
-//
-//                        }
-
-						dataList.addAll(temList);
-
-					} catch(Exception e){
-						Log.e(TAG, "Interrupted Exception in query key");
-					}
-//				}
-
+                } catch(Exception e){
+                    Log.e(TAG, "Interrupted Exception in query key");
+                }
 
 			}
 
@@ -434,7 +378,6 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 
 				String strReceived = line[0].trim();
-//				Log.d(TAG, "recieved::" + strReceived);
 				String[] strReceivedArr = strReceived.split("~");
 
 				DataMessageModel dataMessageModel = new DataMessageModel();
@@ -494,22 +437,7 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 	}
 
-//	private String lookUpDataPosition(DataMessageModel dataMessageModel){
-//
-//		try {
-//
-//			String target = nodeSet.higher(dataMessageModel) != null?
-//					nodeSet.higher(dataMessageModel).getKey() : nodeSet.first().getKey();
-//
-//			return target;
-//
-//		} catch(Exception e){
-//			Log.e(TAG, "Error generating Hash");
-//
-//		}
-//		return null;
-//	}
-//
+
 	private List<String> getReplicaTargetList(String targetNode){
 
 		DataMessageModel first = nodeSet.first();
@@ -610,11 +538,17 @@ public class SimpleDynamoProvider extends ContentProvider {
 
                 writeLock.lock();
 
-                FileOutputStream outputStream;
 
-				outputStream = getContext().openFileOutput(dataMessageModel.getKey() +'~'+Long.toString(dataMessageModel.getInsertTimeStamp()), Context.MODE_PRIVATE);
-				outputStream.write(dataMessageModel.getMessage().getBytes());
-				outputStream.close();
+                SharedPreferences sharedPreference = getContext().getSharedPreferences(DhtOperationTypeConstant.PREFERENCE_FILE, Context.MODE_PRIVATE);
+                SharedPreferences.Editor editor = sharedPreference.edit();
+
+                editor.putString(dataMessageModel.getKey() + "~" + dataMessageModel.insertTimeStamp,
+                        dataMessageModel.getMessage());
+
+                editor.apply();
+
+
+
 
 			} catch (Exception e) {
 				Log.e(TAG, "File write failed");
@@ -629,32 +563,24 @@ public class SimpleDynamoProvider extends ContentProvider {
     private void insertDataListtoLocal(List<DataMessageModel> dataMessageModelList){
 
         try {
-
             writeLock.lock();
 
             for(DataMessageModel data : dataMessageModelList){
 
-//                Log.w(TAG, "syncing::"+ data.getKey());
 
                 List<String> targets = getTargetList(data);
 
                 if(targets.contains(myEmulatorId)){
 
+                    SharedPreferences sharedPreference = getContext().getSharedPreferences(DhtOperationTypeConstant.PREFERENCE_FILE, Context.MODE_PRIVATE);
+                    SharedPreferences.Editor editor = sharedPreference.edit();
 
+                    editor.putString(data.getKey() + "~" + data.getInsertTimeStamp(),
+                            data.getMessage());
 
-                    FileOutputStream outputStream;
-
-                    outputStream = getContext().openFileOutput(data.getKey() +'~'+Long.toString(data.getInsertTimeStamp()), Context.MODE_PRIVATE);
-                    outputStream.write(data.getMessage().getBytes());
-                    outputStream.close();
-
-//                    Log.w(TAG, "$nseing::"+ data.getKey());
-
+                    editor.apply();
                 }
-
             }
-
-
         } catch (Exception e) {
             Log.e(TAG, "File write failed");
         } finally {
@@ -664,13 +590,6 @@ public class SimpleDynamoProvider extends ContentProvider {
 
     }
 
-//	private NodeMessageModel searchNode(TreeSet<NodeMessageModel> nodeSet, NodeMessageModel key) {
-//
-//		NodeMessageModel ceil  = nodeSet.ceiling(key); // least elt >= key
-//		NodeMessageModel floor = nodeSet.floor(key);   // highest elt <= key
-//		return ceil == floor? ceil : null;
-//
-//	}
 
 
 	private List<DataMessageModel> queryDataFromLocal(DataMessageModel dataMessageModel) {
@@ -683,52 +602,48 @@ public class SimpleDynamoProvider extends ContentProvider {
 
 
 		if (dataMessageModel.getDataOperationType().equals(DhtOperationTypeConstant.DATA_QUERY_GLOBAL) || DhtOperationTypeConstant.DATA_QUERY_LOCAL.equals(dataMessageModel.getDataOperationType())){
-			for (String file : getContext().fileList()) {
-				try {
-					inputStream = getContext().openFileInput(file);
-
-					BufferedReader rd = new BufferedReader(new InputStreamReader(inputStream));
-					String mValues = rd.readLine();
-
-//					Log.i(TAG, "file name::" + file);
-
-					String[] fileNameStr = file.trim().split("~");
 
 
-					DataMessageModel messageModel = new DataMessageModel(fileNameStr[0], mValues, dataMessageModel.getDataOperationType(), null, null, null, Long.parseLong(fileNameStr[1]));
-					dataList.add(messageModel);
+            SharedPreferences sharedPreference = getContext().getSharedPreferences(DhtOperationTypeConstant.PREFERENCE_FILE, Context.MODE_PRIVATE);
 
-				} catch (FileNotFoundException e) {
-					Log.e(TAG, "File not found" + file);
-					e.printStackTrace();
-				} catch (IOException e) {
-					Log.e(TAG, "IO Exception");
-				}
+            Map<String, ?> allEntries = sharedPreference.getAll();
 
-			}
+            for (Map.Entry<String, ?> entry : allEntries.entrySet()) {
+
+                String[] keyToMatch = entry.getKey().trim().split("~");
+                DataMessageModel messageModel = new DataMessageModel(keyToMatch[0], entry.getValue().toString(), dataMessageModel.getDataOperationType(), null, null, null, Long.parseLong(keyToMatch[1]));
+                dataList.add(messageModel);
+
+            }
+
+
+
+
+
+
+
 		} else{
-			for (String file : getContext().fileList()) {
-				try {
-					inputStream = getContext().openFileInput(file);
 
-					BufferedReader rd = new BufferedReader(new InputStreamReader(inputStream));
-					String mValues = rd.readLine();
+            SharedPreferences sharedPreference = getContext().getSharedPreferences(DhtOperationTypeConstant.PREFERENCE_FILE, Context.MODE_PRIVATE);
 
-//					Log.i(TAG, "file name::" + file);
+            Map<String, ?> allEntries = sharedPreference.getAll();
 
-					String[] fileNameStr = file.trim().split("~");
+            for (Map.Entry<String, ?> entry : allEntries.entrySet()) {
 
-					if(fileNameStr[0].equals(dataMessageModel.getKey())) {
-						DataMessageModel messageModel = new DataMessageModel(fileNameStr[0], mValues, dataMessageModel.getDataOperationType(), null, null, null, Long.parseLong(fileNameStr[1]));
-						dataList.add(messageModel);
-					}
+                String[] keyToMatch = entry.getKey().trim().split("~");
 
-				} catch (FileNotFoundException e) {
-					Log.e(TAG, "File not found");
-				} catch (IOException e) {
-					Log.e(TAG, "IO Exception");
-				}
-			}
+                if(keyToMatch[0].equals(dataMessageModel.getKey())) {
+                    DataMessageModel messageModel = new DataMessageModel(keyToMatch[0], entry.getValue().toString(), dataMessageModel.getDataOperationType(), null, null, null, Long.parseLong(keyToMatch[1]));
+                    dataList.add(messageModel);
+                }
+
+
+            }
+
+
+
+
+
 		}
 
 
@@ -834,23 +749,40 @@ public class SimpleDynamoProvider extends ContentProvider {
 		if(dataMessageModel.getDataOperationType().equals(DhtOperationTypeConstant.DATA_DELETE_GLOBAL)
 				|| dataMessageModel.getDataOperationType().equals(DhtOperationTypeConstant.DATA_DELETE_LOCAL)){
 
-			String[] fileNames = getContext().fileList();
 
-			for (String file : fileNames)
-				getContext().deleteFile(file);
+            SharedPreferences sharedPreference = getContext().getSharedPreferences(DhtOperationTypeConstant.PREFERENCE_FILE, Context.MODE_PRIVATE);
+            SharedPreferences.Editor editor = sharedPreference.edit();
+            editor.clear();
+            editor.apply();
 
 		} else{
 
-			String[] fileNames = getContext().fileList();
+		    // https://stackoverflow.com/questions/22089411/how-to-get-all-keys-of-sharedpreferences-programmatically-in-android
 
-			for (String file : fileNames) {
+            SharedPreferences sharedPreference = getContext().getSharedPreferences(DhtOperationTypeConstant.PREFERENCE_FILE, Context.MODE_PRIVATE);
 
-				String[] fileNameStr = file.trim().split("~");
+            List<String> toBeDelete = new ArrayList<String>();
 
-				if(fileNameStr[0].equals(dataMessageModel.getKey()))
-					getContext().deleteFile(file);
+            Map<String, ?> allEntries = sharedPreference.getAll();
 
-			}
+            for (Map.Entry<String, ?> entry : allEntries.entrySet()) {
+
+                String[] keyToMatch = entry.getKey().trim().split("~");
+
+                if(keyToMatch[0].equals(dataMessageModel.getKey()))
+                    toBeDelete.add(entry.getKey());
+
+            }
+
+            SharedPreferences.Editor editor = sharedPreference.edit();
+
+            Iterator<String> itr = toBeDelete.iterator();
+
+            while(itr.hasNext())
+                editor.remove(itr.next());
+
+
+            editor.apply();
 
 		}
         writeLock.unlock();
@@ -862,7 +794,6 @@ public class SimpleDynamoProvider extends ContentProvider {
     private void recoverDataAfterFailure(){
 
         DataMessageModel messageModelForDelete = new DataMessageModel(myEmulatorId, "from recovery", DhtOperationTypeConstant.DATA_DELETE_LOCAL, null, myEmulatorId, null, 0L);
-        //deleteDataFromLocal(messageModelForDelete);
 
         List<String> targetList = getNeighborList(messageModelForDelete);
         List<DataMessageModel> dataList = new ArrayList<DataMessageModel>();
@@ -888,6 +819,7 @@ public class SimpleDynamoProvider extends ContentProvider {
     }
 
 
+
     private class SyncMessagesJob implements Runnable {
 
         protected Handler mainHandler;
@@ -899,7 +831,7 @@ public class SimpleDynamoProvider extends ContentProvider {
         public void run() {
             recoverDataAfterFailure();
 
-            mainHandler.postDelayed(this, 4000);
+            mainHandler.postDelayed(this, 10000);
         }
     }
 

@@ -10,4 +10,8 @@ public class DhtOperationTypeConstant {
     public static final String DATA_DELETE_GLOBAL = "DATA_DELETE_GLOBAL";
     public static final String DATA_DELETE_LOCAL = "DATA_DELETE_LOCAL";
 
+    public static final String PREFERENCE_FILE = "dynamoPref";
+
+
+
 }
